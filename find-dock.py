@@ -4,6 +4,7 @@ import cv
 from glob import glob
 from math import *
 from itertools import *
+from operator import itemgetter
 import random
 
 cv.NamedWindow('Screenshot', cv.CV_WINDOW_AUTOSIZE)
@@ -233,28 +234,25 @@ def dockRectProbs(im, x1, y1, x2, y2, incindex, maxCount = None, minSize = None)
 	dockrects = [DockRect(im, (_x1,_y1,_x2,_y2)) for _x1,_y1,_x2,_y2 in iterateRect(x1,y1,x2,y2, im.width, im.height, incindex, maxCount)]
 	return [ dockrect.probability([incindex], minSize) for dockrect in dockrects ]
 
-def normProbs(probs):
-	if len(probs) == 0: return probs
+def normProbsWithParams(probs):
+	if len(probs) == 0: return (probs, 0, 0)
 	_max = max(probs)
 	_min = min(probs)
 	f = _max - _min
-	if f == 0: return probs
-	return [ (x - _min) / f for x in probs ]
+	if f == 0: return (probs, 0, 0)
+	return ([ (x - _min) / f for x in probs ], _min, _max)
 
+def normProbs(probs):
+	return normProbsWithParams(probs)[0]
+	
 def probToColor(p):
 	return cv.RGB(p * 255, p * 255, p * 255)
 
-def argmax(list):
-	return list.index(max(list))
-	i = 0
-	m = None
-	mi = None
-	for o in list:
-		if m == None or o > m:
-			mi = i
-			m = o
-		i += 1
-	return mi
+def argmax(list, index=0):
+	if index == 0:
+		return list.index(max(list))
+	else:
+		return list.index(max(list, key = itemgetter(index)))
 
 def estimated_argmax(list, misscountMax = 100):
 	i = 0
@@ -281,19 +279,6 @@ def bestDockX2(im):
 	x2 += estimated_argmax(dockRectProbs(im, x1,y1,x2,y2, 2))
 	return x2
 
-def bestDockY1(im, x1, x2):
-	y1,y2 = im.height-30, im.height
-	y1 -= estimated_argmax(dockRectProbs(im, x1,y1,x2,y2, 1))
-	return y1
-
-def bestRect(im, x1,y1,x2,y2, maxCount = None):
-	if not maxCount: maxCount = max(im.width, im.height)
-	x1 -= estimated_argmax(dockRectProbs(im, x1,y1,x2,y2, 0))
-	y1 -= estimated_argmax(dockRectProbs(im, x1,y1,x2,y2, 1))
-	x2 += estimated_argmax(dockRectProbs(im, x1,y1,x2,y2, 2))
-	y2 += estimated_argmax(dockRectProbs(im, x1,y1,x2,y2, 3))
-	return (x1,y1,x2,y2)
-
 def makeSquare(rect, newsize = None):
 	x1,y1,x2,y2 = rect
 	w = x2 - x1
@@ -306,75 +291,69 @@ def makeSquare(rect, newsize = None):
 	y2 += (newsize - h) / 2
 	return (x1,y1,x2,y2)
 
-def iterateResizedRectFull(x1,y1,x2,y2, count):
-	yield (x1,y1,x2,y2)
-	while count > 0:
-		x2 += 1
-		y2 += 1
-		yield (x1,y1,x2,y2)
-		x1 -= 1
-		y1 -= 1
-		yield (x1,y1,x2,y2)
-		count -= 1
-		
-def iterateMovedRectFull(x1,y1,x2,y2, count):
-	orig = (x1,y1,x2,y2)
-	yield orig
-	x1 -= count
-	x2 -= count
-	y1 -= count
-	y2 -= count
-	while count > 0:
-		for i in xrange(count * 2):
-			x1 += 1
-			x2 += 1
-			yield (x1,y1,x2,y2)
-		for i in xrange(count * 2):
-			y1 += 1
-			y2 += 1
-			yield (x1,y1,x2,y2)
-		for i in xrange(count * 2):
-			x1 -= 1
-			x2 -= 1
-			yield (x1,y1,x2,y2)
-		for i in xrange(count * 2):
-			y1 -= 1
-			y2 -= 1
-			yield (x1,y1,x2,y2)
-		x1 += 1
-		x2 += 1
-		y1 += 1
-		y2 += 1
-		count -= 1
-	
-def bestSquareRect(im, x1,y1,x2,y2, maxCount = None):
-	if not maxCount: maxCount = max(im.width, im.height)
+def iterateRectSet(baserect, dist, rectCount = 4):
+	r = list(baserect)
+	w = r[2] - r[0]
+	num = 0
+	while True:
+		if rectCount >= 0 and num >= rectCount: return
+		yield tuple(r)
+		r[0] += w + dist
+		r[2] = r[0] + w
+		num += 1
+
+def probabilityOfRectset(im, baserect, dist, rectCount):
 	minSize = 200
+	probargs = (range(0,4), minSize, 2)
+	return sum(
+		map(lambda r: DockRect(im, r).probability(*probargs),
+		iterateRectSet(baserect, dist, rectCount)) )
+	
+def bestSquareRects(im, x1,y1,x2,y2, rectCount = 6):
+	minSize = 400
 	while True:
 		oldrect = (x1,y1,x2,y2)
 
-		dockrects = [(x1,y1,x2,y2)]
+		baserects = [(x1,y1,x2,y2)]
 		for i in range(0,4):
-			dockrects += iterateRect(x1,y1,x2,y2, im.width, im.height, i, 30, 10)
-		dockrects = map(makeSquare, dockrects)
-
-		if False:
-			dockrects = iterateResizedRectFull(x1,y1,x2,y2, count=2)
-			dockrects = map(lambda rect: iterateMovedRectFull(*rect, count=5), dockrects)
-			dockrects = set(chain(*dockrects))
+			baserects += iterateRect(x1,y1,x2,y2, im.width, im.height, i, maxCount=25, earlierBreak=2)
+		baserects = map(makeSquare, baserects)
+		dockrects = []
+		for r in baserects:
+			for d in range(0,10):
+				dockrects += [(r, d, probabilityOfRectset(im, r, d, rectCount))]
 		
-		dockrects = [ DockRect(im, rect) for rect in dockrects ]
+		bestrect = max(dockrects, key = itemgetter(2))
+		print oldrect, bestrect, rectSize(oldrect), rectSize(bestrect[0]), len(dockrects)
+		x1,y1,x2,y2 = bestrect[0]
+		if bestrect[0] == oldrect: break
+		if rectSize(bestrect[0]) >= minSize and rectSize(bestrect[0]) - rectSize(oldrect) <= 0: break
+	return bestrect
 
-		bestrect = best_dockrect(dockrects, range(0,4), minSize, 10)
-		x1,y1,x2,y2 = bestrect
-		print oldrect, bestrect, rectSize(oldrect), rectSize(bestrect), len(dockrects)
-		if bestrect == oldrect: break
-		if rectSize(bestrect) >= minSize and rectSize(bestrect) - rectSize(oldrect) <= 0: break
-	return (x1,y1,x2,y2)
 
-files = glob("2010-10-11.*.png") # bottom dock with eclipse
+
+
+def iterateIconsMostProbable(im, baserect, dist):
+	probs = []
+	forwardNum = 3
+	for r in iterateRectSet(baserect, dist, -1):
+		prob = probabilityOfRectset(im, r, dist, forwardNum) / forwardNum
+		
+		probs += [probabilityOfRectset(im, r, dist, 1)]
+		
+		num = len(probs)
+		#print num, ":", vecAverage(probs), prob, vecAverage(probs) / prob
+		if vecAverage(probs) / prob > 1.3: return
+		#if num > 20: return
+		
+		yield r
+		
+
+files = glob("2010-10-*.png")
+#files = glob("2010-10-11.*.png") # bottom dock with eclipse
 #files = glob("2010-10-28.*.png") # left dock with eclipse
 i = 0
+random.shuffle(files)
 
 def showImageWithRects(im, rects):
 	imcopy = cv.CloneImage(im)
@@ -420,23 +399,9 @@ while True:
 	dockx1,dockx2 = x1,x2
 	showImageWithRects(im, rects)		
 	
-	x1,y1 = x1, y2 - 20
-	x2,y2 = x1 + 1, y1 + 1
-	num = 0
-	avgData = (0,0,0,30) # w,y1,y2,dist
-	lastX2 = x2
-	while x1 < dockx2:
-		rect = bestSquareRect(im, x1 + avgData[3], y1, x2 + avgData[3], y2)
-		if x1 == 0: break # bug?
-		rects += [rect]
-		showImageWithRects(im, rects)
-		avgData = vecSum(vecMult(avgData, num), (rect[2] - rect[0], rect[1], rect[3], x2 - rect[0]))
-		num += 1
-		avgData = vecMult(avgData, 1.0 / num)
-		x1,y1,x2,y2 = rect
-		x1,y1 = x2, avgData[1]
-		x2,y2 = x1 + avgData[0], avgData[2]
-		x1,y1,x2,y2 = rectMultSize((x1,y1,x2,y2), 0.8)
+	rect,dist,prob = bestSquareRects(im, x1 + 30, im.height - 20, x1 + 35, im.height - 15)
+	rects += iterateIconsMostProbable(im,rect,dist)
+	#showImageWithRects(im, rects)
 		
 	if showProbs:
 		x = x1
