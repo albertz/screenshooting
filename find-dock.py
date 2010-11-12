@@ -240,15 +240,28 @@ def estimated_argmax(list, misscountMax = 100):
 	return mi
 
 
-def bestDockX1(im):
-	x1,y1,x2,y2 = im.width/2, im.height-1, im.width/2, im.height
-	x1 -= estimated_argmax(dockRectProbs(im, x1,y1,x2,y2, 0))
-	return x1
+def bestRectCoordWithProb(im, x1,y1,x2,y2, index):
+	probs = list(dockRectProbs(im, x1,y1,x2,y2, index))
+	i = estimated_argmax(probs)
+	return (i, probs[i])
 
-def bestDockX2(im):
-	x1,y1,x2,y2 = im.width/2, im.height-1, im.width/2, im.height
-	x2 += estimated_argmax(dockRectProbs(im, x1,y1,x2,y2, 2))
-	return x2
+def bestDockBottom(im):
+	y1,y2 = im.height-1, im.height
+	dx1,pdx1 = bestRectCoordWithProb(im, im.width/2,y1,im.width/2,y2, 0)
+	x1 = im.width/2 - dx1
+	dx2,pdx2 = bestRectCoordWithProb(im, im.width/2,y1,im.width/2,y2, 2)
+	x2 = im.width/2 - dx2
+	return ((x1,y1,x2,y2), pdx1 * pdx2)
+
+def bestDockLeft(im):
+	x1,x2 = 0, 1
+	dy1,pdy1 = bestRectCoordWithProb(im, x1,im.height/2,x2,im.height/2, 1)
+	y1 = im.height/2 + dy1
+	dy2,pdy2 = bestRectCoordWithProb(im, x1,im.height/2,x2,im.height/2, 3)
+	y2 = im.height/2 - dy2
+	return ((x1,y1,x2,y2), pdy1 * pdy2)
+
+
 
 def makeSquare(rect, newsize = None):
 	x1,y1,x2,y2 = rect
@@ -304,13 +317,13 @@ def bestSquareRects(im, x1,y1,x2,y2, rectCount = 6):
 
 
 
-def iterateIconsMostProbable(im, baserect, dist):
+def iterateIconsMostProbable(im, baserect, dist, index):
 	probs = []
 	forwardNum = 3
-	for r in iterateRectSet(baserect, dist, -1):
-		prob = probabilityOfRectset(im, r, dist, forwardNum) / forwardNum
+	for r in iterateRectSet(baserect, dist, index -1):
+		prob = probabilityOfRectset(im, r, dist, index, forwardNum) / forwardNum
 		
-		probs += [probabilityOfRectset(im, r, dist, 1)]
+		probs += [probabilityOfRectset(im, r, dist, index, 1)]
 		
 		num = len(probs)
 		#print num, ":", vecAverage(probs), prob, vecAverage(probs) / prob
@@ -321,8 +334,8 @@ def iterateIconsMostProbable(im, baserect, dist):
 		
 
 #files = glob("2010-10-*.png")
-files = glob("2010-10-11.*.png") # bottom dock with eclipse
-#files = glob("2010-10-28.*.png") # left dock with eclipse
+#files = glob("2010-10-11.*.png") # bottom dock with eclipse
+files = glob("2010-10-28.*.png") # left dock with eclipse
 i = 0
 random.shuffle(files)
 
@@ -363,33 +376,22 @@ while True:
 	rects = []
 	showImageWithRects(im, rects)		
 
-	x1,y1,x2,y2 = im.width/2, im.height-1, im.width/2, im.height
-	x1 = bestDockX1(im)
-	x2 = bestDockX2(im)
-	
-	
-	#y1 = bestDockY1(im, x2 - 20, x2)
+
+	(x1,y1,x2,y2),prob = bestDockLeft(im)
+
 	rects += [(x1,y1,x2,y2)]
 	dockx1,dockx2 = x1,x2
-	showImageWithRects(im, rects)		
+	showImageWithRects(im, rects)
 	
-	rect,dist,prob = bestSquareRects(im, x1 + 30, im.height - 20, x1 + 35, im.height - 15)
-	rects += iterateIconsMostProbable(im,rect,dist)
-	#showImageWithRects(im, rects)
+	#rect,dist,prob = bestSquareRects(im, x1 + 30, im.height - 20, x1 + 35, im.height - 15)
+	#rects += iterateIconsMostProbable(im,rect,dist)
 		
 	if showProbs:
 		x = x1
-		#for p in normProbs(dockRectProbs(im, im.width/2, im.height-1, im.width/2, im.height, 2)):
 		for p in normProbs(dockRectProbs(im, x1,y1,x2,y2, 0)):
 			draw_rects(im, [(x,im.height-2,x+1,im.height)], probToColor(p))
 			x -= 1
 		
-		#rect = best_dockrect([DockRect(im, (im.width/2,im.height-1,x,im.height)) for x in xrange(im.width/2, im.width-100)], [2])
-	
-	#rect = best_dockrect([random_dockrect_bottom(im, (0,im.height-1,im.width,im.height)) for i in xrange(0,100)])
-	#print rect
-	#draw_rects(im, rects)
-	#cv.ShowImage('Screenshot', im)
 	showImageWithRects(im, rects)		
 	
 	key = cv.WaitKey(0)
