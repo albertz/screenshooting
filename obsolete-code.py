@@ -118,3 +118,26 @@ def random_line_seps(im, x1, x2, y1, y2, sepnum = 3):
 	if y1 == y2: return [ (_x1, y1, _x2, y2) for _x1,_x2 in random_sequence(x1,x2) ]
 	assert False
 
+
+
+def best_dockrect__cutoff(dockrects, indices, cutoffnum = 100):
+	dockrects = [ (dockrect.rect, dockrect.probability(indices)) for dockrect in dockrects ]
+	probmax = -100000000
+	rect = (0,0,0,0)
+	misscount = 0
+	for dockrect,dockprob in dockrects:
+		if dockprob > probmax:
+			misscount = 0
+			probmax = dockprob
+			rect = dockrect
+		elif probmax > 0.5:
+			misscount += 1
+			if misscount > cutoffnum: break
+	return rect
+
+
+def random_dockrect_bottom(im, inrect):
+	y1 = random.uniform(inrect[1], inrect[3])
+	y2 = inrect[3]
+	x1, x2, _ = random_divide(inrect[0], inrect[2], 3)
+	return DockRect(im, (x1,y1,x2,y2))
