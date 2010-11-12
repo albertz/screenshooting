@@ -3,6 +3,7 @@
 import cv
 from glob import glob
 from math import *
+from itertools import *
 import random
 
 cv.NamedWindow('Screenshot', cv.CV_WINDOW_AUTOSIZE)
@@ -120,7 +121,10 @@ def index_filter(ls, *indices):
 	return [ ls[i] for i in indices ]
 
 def rectSize(rect):
-	return (rect[2] - rect[0]) * (rect[3] - rect[1])
+	x1,y1,x2,y2 = rect
+	w = x2 - x1
+	h = y2 - y1
+	return w * h
 	
 def rectsSizeSum(rects):
 	return sum(rectSize(rect) for rect in rects)
@@ -130,8 +134,7 @@ class DockRect:
 		self.im = im
 		self.rect = rect
 	
-	def surrounding_rects(self):
-		space = 100
+	def surrounding_rects(self, space):
 		x1,y1,x2,y2 = self.rect
 		r1 = (x1 - space, y1, x1, y2) # left
 		r2 = (x1 - space, y1 - space, x2 + space, y1) # top
@@ -139,7 +142,7 @@ class DockRect:
 		r4 = (x1 - space, y2, x2 + space, y2 + space) # bottom
 		return [ r1, r2, r3, r4 ]
 	
-	def inner_rects(self):
+	def inner_rects(self, indices):
 		thick = 1
 		x1,y1,x2,y2 = self.rect
 		r1 = (x1,y2-thick,x2,y2)
@@ -147,13 +150,16 @@ class DockRect:
 		r3 = (x2-thick,y1,x2,y2)
 		#if x1 == 0: return [r1, r2]
 		#return [r1, r3]
-		return [r1]
+		#return [r1]
+		return [self.rect]
 		
-	def probability(self, indices = xrange(0,4)):
-		innerRects = self.inner_rects()
-		outerRects = index_filter(self.surrounding_rects(), *indices)
-		if rectsSizeSum(innerRects) < 30: return 0
-		if rectsSizeSum(outerRects) < 30: return 0
+	def probability(self, indices = xrange(0,4), minSize = None, surroundingSpace = None):
+		if not minSize: minSize = 30
+		innerRects = self.inner_rects(indices)
+		if not surroundingSpace: surroundingSpace = max(1, rectsSizeSum(innerRects))
+		outerRects = index_filter(self.surrounding_rects(surroundingSpace), *indices)
+		if rectsSizeSum(innerRects) < minSize: return 0
+		if rectsSizeSum(outerRects) < minSize: return 0
 		histInner = hist_for_im_rects(self.im, innerRects)
 		histOuter = hist_for_im_rects(self.im, outerRects)
 		histDiff = cv.CompareHist(histInner, histOuter, cv.CV_COMP_BHATTACHARYYA)
@@ -161,24 +167,25 @@ class DockRect:
 		#print histDiff
 		return histDiff # the higher the diff, the better the probalitity (we want to have the best sepeaation)
 
-def best_avg_dockrect(dockrects, indices):
-	dockrects = [ (dockrect.rect, dockrect.probability(indices)) for dockrect in dockrects ]
-	probsum = sum([ p for _,p in dockrects ])
+def best_avg_dockrect(dockrects, *probargs):
+	rects = [ dockrect.rect for dockrect in dockrects ]
+	probs = normProbs([ dockrect.probability(*probargs) for dockrect in dockrects ])	
+	probsum = sum(probs)
 	rect = [0,0,0,0]
-	for dockrect,dockprob in dockrects:
+	for dockrect,dockprob in zip(rects,probs):
 		for i in [0,1,2,3]:
 			rect[i] += dockrect[i] * dockprob / probsum
 	return tuple(rect)
 
-def best_dockrect(dockrects, indices):
-	dockrects = [ (dockrect.rect, dockrect.probability(indices)) for dockrect in dockrects ]
+def best_dockrect(dockrects, *probargs):
+	dockrects = [ (dockrect.rect, dockrect.probability(*probargs)) for dockrect in dockrects ]
 	probmax = -100000000
 	rect = (0,0,0,0)
 	for dockrect,dockprob in dockrects:
 		if dockprob >= probmax:
 			probmax = dockprob
 			rect = dockrect
-	print rect, probmax
+	#print rect, probmax
 	return rect
 
 def best_dockrect__cutoff(dockrects, indices, cutoffnum = 100):
@@ -203,9 +210,8 @@ def random_dockrect_bottom(im, inrect):
 	return DockRect(im, (x1,y1,x2,y2))
 
 
-def iterateRect(x1,y1,x2,y2, maxx, maxy, incindex, maxCount):
+def iterateRect(x1,y1,x2,y2, maxx, maxy, incindex, maxCount, earlierBreak = 100):
 	rect = [x1,y1,x2,y2]
-	earlierBreak = 100
 	count = 0
 	while True:
 		x1,y1,x2,y2 = rect
@@ -222,10 +228,10 @@ def iterateRect(x1,y1,x2,y2, maxx, maxy, incindex, maxCount):
 		count += 1
 		if count >= maxCount: return
 		
-def dockRectProbs(im, x1, y1, x2, y2, incindex, maxCount = None):
+def dockRectProbs(im, x1, y1, x2, y2, incindex, maxCount = None, minSize = None):
 	if not maxCount: maxCount = max(im.width,im.height)
 	dockrects = [DockRect(im, (_x1,_y1,_x2,_y2)) for _x1,_y1,_x2,_y2 in iterateRect(x1,y1,x2,y2, im.width, im.height, incindex, maxCount)]
-	return [ dockrect.probability([incindex]) for dockrect in dockrects ]
+	return [ dockrect.probability([incindex], minSize) for dockrect in dockrects ]
 
 def normProbs(probs):
 	if len(probs) == 0: return probs
@@ -250,17 +256,17 @@ def argmax(list):
 		i += 1
 	return mi
 
-def estimated_argmax(list):
+def estimated_argmax(list, misscountMax = 100):
 	i = 0
 	m = None
-	mi = None
+	mi = 0 # None
 	misscount = 0	
 	for o in list:
 		if m == None or o > m:
 			mi = i
 			m = o
 			misscount = 0
-		elif misscount > 100: break
+		elif misscount > misscountMax: break
 		i += 1
 	return mi
 
@@ -280,41 +286,169 @@ def bestDockY1(im, x1, x2):
 	y1 -= estimated_argmax(dockRectProbs(im, x1,y1,x2,y2, 1))
 	return y1
 
+def bestRect(im, x1,y1,x2,y2, maxCount = None):
+	if not maxCount: maxCount = max(im.width, im.height)
+	x1 -= estimated_argmax(dockRectProbs(im, x1,y1,x2,y2, 0))
+	y1 -= estimated_argmax(dockRectProbs(im, x1,y1,x2,y2, 1))
+	x2 += estimated_argmax(dockRectProbs(im, x1,y1,x2,y2, 2))
+	y2 += estimated_argmax(dockRectProbs(im, x1,y1,x2,y2, 3))
+	return (x1,y1,x2,y2)
 
+def makeSquare(rect, newsize = None):
+	x1,y1,x2,y2 = rect
+	w = x2 - x1
+	h = y2 - y1
+	if not newsize: newsize = max(w, h)
+	#if not newsize: newsize = (w + h) / 2
+	x1 -= (newsize - w) / 2
+	x2 += (newsize - w) / 2
+	y1 -= (newsize - h) / 2
+	y2 += (newsize - h) / 2
+	return (x1,y1,x2,y2)
+
+def iterateResizedRectFull(x1,y1,x2,y2, count):
+	yield (x1,y1,x2,y2)
+	while count > 0:
+		x2 += 1
+		y2 += 1
+		yield (x1,y1,x2,y2)
+		x1 -= 1
+		y1 -= 1
+		yield (x1,y1,x2,y2)
+		count -= 1
+		
+def iterateMovedRectFull(x1,y1,x2,y2, count):
+	orig = (x1,y1,x2,y2)
+	yield orig
+	x1 -= count
+	x2 -= count
+	y1 -= count
+	y2 -= count
+	while count > 0:
+		for i in xrange(count * 2):
+			x1 += 1
+			x2 += 1
+			yield (x1,y1,x2,y2)
+		for i in xrange(count * 2):
+			y1 += 1
+			y2 += 1
+			yield (x1,y1,x2,y2)
+		for i in xrange(count * 2):
+			x1 -= 1
+			x2 -= 1
+			yield (x1,y1,x2,y2)
+		for i in xrange(count * 2):
+			y1 -= 1
+			y2 -= 1
+			yield (x1,y1,x2,y2)
+		x1 += 1
+		x2 += 1
+		y1 += 1
+		y2 += 1
+		count -= 1
+	
+def bestSquareRect(im, x1,y1,x2,y2, maxCount = None):
+	if not maxCount: maxCount = max(im.width, im.height)
+	minSize = 200
+	while True:
+		oldrect = (x1,y1,x2,y2)
+
+		dockrects = [(x1,y1,x2,y2)]
+		for i in range(0,4):
+			dockrects += iterateRect(x1,y1,x2,y2, im.width, im.height, i, 30, 10)
+		dockrects = map(makeSquare, dockrects)
+
+		if False:
+			dockrects = iterateResizedRectFull(x1,y1,x2,y2, count=2)
+			dockrects = map(lambda rect: iterateMovedRectFull(*rect, count=5), dockrects)
+			dockrects = set(chain(*dockrects))
+		
+		dockrects = [ DockRect(im, rect) for rect in dockrects ]
+
+		bestrect = best_dockrect(dockrects, range(0,4), minSize, 10)
+		x1,y1,x2,y2 = bestrect
+		print oldrect, bestrect, rectSize(oldrect), rectSize(bestrect), len(dockrects)
+		if bestrect == oldrect: break
+		if rectSize(bestrect) >= minSize and rectSize(bestrect) - rectSize(oldrect) <= 0: break
+	return (x1,y1,x2,y2)
 
 files = glob("2010-10-11.*.png") # bottom dock with eclipse
 #files = glob("2010-10-28.*.png") # left dock with eclipse
 i = 0
 
+def showImageWithRects(im, rects):
+	imcopy = cv.CloneImage(im)
+	draw_rects(imcopy, rects)
+	cv.ShowImage("Screenshot", imcopy)
+	cv.WaitKey(1)
+
+def vecMult(r, f):
+	return map(lambda x: x * f, r)
+
+def vecSum(r1, r2):
+	return map(lambda (x1,x2): x1 + x2, zip(r1,r2))
+
+def rectMultSize(rect, f):
+	x1,y1,x2,y2 = rect
+	w = x2 - x1
+	h = y2 - y1
+	neww = w * f
+	newh = h * f
+	x1 -= (neww - w) / 2
+	x2 += (neww - w) / 2
+	y1 -= (newh - h) / 2
+	y2 += (newh - h) / 2
+	return (x1,y1,x2,y2)	
+	
 showProbs = False
 while True:
 	f = files[i]
 	print f
 	im = cv.LoadImage(f)
 
-	cv.ShowImage('Screenshot', im)
-		
+	rects = []
+	showImageWithRects(im, rects)		
+
 	x1,y1,x2,y2 = im.width/2, im.height-1, im.width/2, im.height
 	x1 = bestDockX1(im)
 	x2 = bestDockX2(im)
-	y1 = bestDockY1(im, x2 - 20, x2)
-
+	#y1 = bestDockY1(im, x2 - 20, x2)
+	rects += [(x1,y1,x2,y2)]
+	dockx1,dockx2 = x1,x2
+	showImageWithRects(im, rects)		
+	
+	x1,y1 = x1, y2 - 20
+	x2,y2 = x1 + 1, y1 + 1
+	num = 0
+	avgData = (0,0,0,30) # w,h,y1,dist
+	lastX2 = x2
+	while x1 < dockx2:
+		rect = bestSquareRect(im, x1+avgData[3],y1,x2+avgData[3],y2)
+		if x1 == 0: break # bug?
+		rects += [rect]
+		showImageWithRects(im, rects)
+		avgData = vecSum(vecMult(avgData, num), (rect[2]-rect[0],rect[3]-rect[1],rect[1], x2 - rect[0]))
+		num += 1
+		avgData = vecMult(avgData, 1.0 / num)
+		x1,y1,x2,y2 = rect
+		x1,y1 = x2, avgData[2]
+		x2,y2 = x1 + avgData[0], y1 + avgData[1]
+		x1,y1,x2,y2 = rectMultSize((x1,y1,x2,y2), 0.5)
+		
 	if showProbs:
 		x = x1
 		#for p in normProbs(dockRectProbs(im, im.width/2, im.height-1, im.width/2, im.height, 2)):
 		for p in normProbs(dockRectProbs(im, x1,y1,x2,y2, 0)):
 			draw_rects(im, [(x,im.height-2,x+1,im.height)], probToColor(p))
 			x -= 1
-		rect = None
-	else:
-		rect = (x1,y1,x2,y2)
 		
 		#rect = best_dockrect([DockRect(im, (im.width/2,im.height-1,x,im.height)) for x in xrange(im.width/2, im.width-100)], [2])
 	
 	#rect = best_dockrect([random_dockrect_bottom(im, (0,im.height-1,im.width,im.height)) for i in xrange(0,100)])
 	#print rect
-	if rect != None: draw_rects(im, [rect])
-	cv.ShowImage('Screenshot', im)
+	#draw_rects(im, rects)
+	#cv.ShowImage('Screenshot', im)
+	showImageWithRects(im, rects)		
 	
 	key = cv.WaitKey(0)
 	if key in [27, ord('q')]: quit()
