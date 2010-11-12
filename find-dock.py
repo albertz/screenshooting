@@ -388,6 +388,9 @@ def vecMult(r, f):
 def vecSum(r1, r2):
 	return map(lambda (x1,x2): x1 + x2, zip(r1,r2))
 
+def vecAverage(v):
+	return sum(v) / len(v)
+
 def rectMultSize(rect, f):
 	x1,y1,x2,y2 = rect
 	w = x2 - x1
@@ -420,20 +423,20 @@ while True:
 	x1,y1 = x1, y2 - 20
 	x2,y2 = x1 + 1, y1 + 1
 	num = 0
-	avgData = (0,0,0,30) # w,h,y1,dist
+	avgData = (0,0,0,30) # w,y1,y2,dist
 	lastX2 = x2
 	while x1 < dockx2:
-		rect = bestSquareRect(im, x1+avgData[3],y1,x2+avgData[3],y2)
+		rect = bestSquareRect(im, x1 + avgData[3], y1, x2 + avgData[3], y2)
 		if x1 == 0: break # bug?
 		rects += [rect]
 		showImageWithRects(im, rects)
-		avgData = vecSum(vecMult(avgData, num), (rect[2]-rect[0],rect[3]-rect[1],rect[1], x2 - rect[0]))
+		avgData = vecSum(vecMult(avgData, num), (rect[2] - rect[0], rect[1], rect[3], x2 - rect[0]))
 		num += 1
 		avgData = vecMult(avgData, 1.0 / num)
 		x1,y1,x2,y2 = rect
-		x1,y1 = x2, avgData[2]
-		x2,y2 = x1 + avgData[0], y1 + avgData[1]
-		x1,y1,x2,y2 = rectMultSize((x1,y1,x2,y2), 0.5)
+		x1,y1 = x2, avgData[1]
+		x2,y2 = x1 + avgData[0], avgData[2]
+		x1,y1,x2,y2 = rectMultSize((x1,y1,x2,y2), 0.8)
 		
 	if showProbs:
 		x = x1
