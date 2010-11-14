@@ -34,10 +34,23 @@ def __hs_histogram_base(src, hist):
 	cv.CalcHist([cv.GetImage(i) for i in planes], hist, 1)
 
 
-def __create_default_hist():
+# we need this hack because there is a memleak in cv.CreateHist
+
+def __create_default_hist__pool_entry():
 	range = [0, 255]
 	ranges = [range, range, range]
 	hist = cv.CreateHist([40,40,40], cv.CV_HIST_ARRAY, ranges, 1)
+	return hist
+
+# 2 entries should be enough for all our use cases
+__hist_pool = [ __create_default_hist__pool_entry() for i in xrange(2) ]
+__hist_pool_index = 0
+
+def __create_default_hist():
+	global __hist_pool, __hist_pool_index
+	hist = __hist_pool[__hist_pool_index]
+	__hist_pool_index += 1
+	__hist_pool_index %= len(__hist_pool)
 	cv.ClearHist(hist)
 	return hist
 
@@ -119,6 +132,7 @@ class DockRect:
 		if not surroundingSpace: surroundingSpace = 30 #surroundingSpace = max(1, rectsSizeSum(innerRects))
 		
 		cacheIndex = (tuple(self.rect), tuple(indices), minSize, surroundingSpace)
+		global RectProbCache
 		if cacheIndex in RectProbCache: return RectProbCache[cacheIndex]
 		
 		outerRects = index_filter(self.surrounding_rects(surroundingSpace), *indices)
