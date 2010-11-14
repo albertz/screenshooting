@@ -158,7 +158,7 @@ class DockRect:
 	def probability(self, indices = xrange(0,4), minSize = None, surroundingSpace = None):
 		if not minSize: minSize = 30
 		innerRects = self.inner_rects(indices)
-		if not surroundingSpace: surroundingSpace = 10 #surroundingSpace = max(1, rectsSizeSum(innerRects))
+		if not surroundingSpace: surroundingSpace = 30 #surroundingSpace = max(1, rectsSizeSum(innerRects))
 		
 		cacheIndex = (tuple(self.rect), tuple(indices), minSize, surroundingSpace)
 		if cacheIndex in RectProbCache: return RectProbCache[cacheIndex]
@@ -240,7 +240,7 @@ def argmax(list, index=0):
 	else:
 		return list.index(max(list, key = itemgetter(index)))
 
-def estimated_argmax(list, misscountMax = 20):
+def estimated_argmax(list, misscountMax = 1000):
 	i = 0
 	m = None
 	mi = 0 # None
@@ -268,13 +268,19 @@ def bestDockBottom(im):
 	x2 = im.width/2 + dx2
 	return ((x1,y1,x2,y2), pdx1 * pdx2)
 
-def bestDockLeft(im):
-	x1,x2 = 0, 1
+def bestDockVert(im, x):
+	x1,x2 = x, x+1
 	dy1,pdy1 = bestRectCoordWithProb(im, x1,im.height/2,x2,im.height/2, 1)
 	y1 = im.height/2 - dy1
 	dy2,pdy2 = bestRectCoordWithProb(im, x1,im.height/2,x2,im.height/2, 3)
 	y2 = im.height/2 + dy2
 	return ((x1,y1,x2,y2), pdy1 * pdy2)
+
+def bestDockLeft(im):
+	return bestDockVert(im, 0)
+
+def bestDockRight(im):
+	return bestDockVert(im, im.width-1)
 
 
 
@@ -386,7 +392,6 @@ while True:
 	f = files[i]
 	print f
 	im = cv.LoadImage(f)
-	RectProbCache = dict()
 
 	rects = []
 	showImageWithRects(im, rects)		
@@ -396,7 +401,7 @@ while True:
 	print "left prob:", prob
 	(x1,y1,x2,y2),prob = bestDockBottom(im)
 	print "bottom prob:", prob
-
+	print "cache size:", len(RectProbCache)
 
 	rects += [(x1,y1,x2,y2)]
 	dockx1,dockx2 = x1,x2
@@ -406,14 +411,17 @@ while True:
 	#rects += iterateIconsMostProbable(im,rect,dist)
 		
 	if showProbs:
-		y = im.height/2
-		for p in dockRectProbs(im, 0,im.height/2,1,im.height/2, 3):
-			print y, ":", p
-			draw_rects(im, [(0,y-1,1,y)], probToColor(p))
-			y += 1
+		x = im.width/2
+		for p in dockRectProbs(im, im.width/2,im.height-1,im.width/2,im.height, 2):
+			print x, ":", p
+			draw_rects(im, [(x-1,im.height-1,x,im.height)], probToColor(p))
+			x += 1
 		rects = []
 		
 	showImageWithRects(im, rects)		
+	RectProbCache = dict()
+	im = None
+	rects = None
 	
 	key = cv.WaitKey(0)
 	if key in [27, ord('q')]: quit()
