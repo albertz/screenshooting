@@ -80,6 +80,15 @@ def hist_for_im_rects(im, rects):
 def hist_for_im_rect(im, rect):
 	return hist_for_im_rects(im, [rect])
 
+def compareColorsInAreas(im1, rects1, im2, rects2):
+	hist1 = hist_for_im_rects(im1, rects1)
+	hist2 = hist_for_im_rects(im2, rects2)
+	histDiff = cv.CompareHist(hist1, hist2, cv.CV_COMP_BHATTACHARYYA)
+	
+	#histDiff = 1 - histDiff
+	#print histDiff
+	return histDiff
+	
 
 def index_filter(ls, *indices):
 	return [ ls[i] for i in indices ]
@@ -104,9 +113,9 @@ class DockRect:
 	def surrounding_rects(self, space):
 		x1,y1,x2,y2 = self.rect
 		r1 = (x1 - space, y1, x1, y2) # left
-		r2 = (x1 - space, y1 - space, x2 + space, y1) # top
+		r2 = (x1, y1 - space, x2, y1) # top
 		r3 = (x2, y1, x2 + space , y2) # right
-		r4 = (x1 - space, y2, x2 + space, y2 + space) # bottom
+		r4 = (x1, y2, x2, y2 + space) # bottom
 		return [ r1, r2, r3, r4 ]
 	
 	def inner_rects(self, indices):
@@ -123,19 +132,17 @@ class DockRect:
 	def probability(self, indices = xrange(0,4), minSize = None, surroundingSpace = None):
 		if not minSize: minSize = 30
 		innerRects = self.inner_rects(indices)
-		if not surroundingSpace: surroundingSpace = max(1, rectsSizeSum(innerRects))
+		if not surroundingSpace: surroundingSpace = 10 #surroundingSpace = max(1, rectsSizeSum(innerRects))
 		
 		cacheIndex = (tuple(self.rect), tuple(indices), minSize, surroundingSpace)
 		if cacheIndex in RectProbCache: return RectProbCache[cacheIndex]
 		
 		outerRects = index_filter(self.surrounding_rects(surroundingSpace), *indices)
 		if rectsSizeSum(innerRects) < minSize: return 0
-		if rectsSizeSum(outerRects) < minSize: return 0
-		histInner = hist_for_im_rects(self.im, innerRects)
-		histOuter = hist_for_im_rects(self.im, outerRects)
-		histDiff = cv.CompareHist(histInner, histOuter, cv.CV_COMP_BHATTACHARYYA)
-		#histDiff = -histDiff
-		#print histDiff
+		if rectsSizeSum(outerRects) < min(surroundingSpace, minSize): return 0
+		
+		histDiff = compareColorsInAreas(self.im, innerRects, self.im, outerRects)
+
 		RectProbCache[cacheIndex] = histDiff
 		return histDiff # the higher the diff, the better the probalitity (we want to have the best sepeaation)
 
@@ -160,29 +167,8 @@ def best_dockrect(dockrects, *probargs):
 	#print rect, probmax
 	return rect
 
-def best_dockrect__cutoff(dockrects, indices, cutoffnum = 100):
-	dockrects = [ (dockrect.rect, dockrect.probability(indices)) for dockrect in dockrects ]
-	probmax = -100000000
-	rect = (0,0,0,0)
-	misscount = 0
-	for dockrect,dockprob in dockrects:
-		if dockprob > probmax:
-			misscount = 0
-			probmax = dockprob
-			rect = dockrect
-		elif probmax > 0.5:
-			misscount += 1
-			if misscount > cutoffnum: break
-	return rect
 
-def random_dockrect_bottom(im, inrect):
-	y1 = random.uniform(inrect[1], inrect[3])
-	y2 = inrect[3]
-	x1, x2, _ = random_divide(inrect[0], inrect[2], 3)
-	return DockRect(im, (x1,y1,x2,y2))
-
-
-def iterateRect(x1,y1,x2,y2, maxx, maxy, incindex, maxCount, earlierBreak = 100):
+def iterateRect(x1,y1,x2,y2, maxx, maxy, incindex, maxCount, earlierBreak = 30):
 	rect = [x1,y1,x2,y2]
 	count = 0
 	while True:
@@ -225,7 +211,7 @@ def argmax(list, index=0):
 	else:
 		return list.index(max(list, key = itemgetter(index)))
 
-def estimated_argmax(list, misscountMax = 100):
+def estimated_argmax(list, misscountMax = 20):
 	i = 0
 	m = None
 	mi = 0 # None
@@ -250,15 +236,15 @@ def bestDockBottom(im):
 	dx1,pdx1 = bestRectCoordWithProb(im, im.width/2,y1,im.width/2,y2, 0)
 	x1 = im.width/2 - dx1
 	dx2,pdx2 = bestRectCoordWithProb(im, im.width/2,y1,im.width/2,y2, 2)
-	x2 = im.width/2 - dx2
+	x2 = im.width/2 + dx2
 	return ((x1,y1,x2,y2), pdx1 * pdx2)
 
 def bestDockLeft(im):
 	x1,x2 = 0, 1
 	dy1,pdy1 = bestRectCoordWithProb(im, x1,im.height/2,x2,im.height/2, 1)
-	y1 = im.height/2 + dy1
+	y1 = im.height/2 - dy1
 	dy2,pdy2 = bestRectCoordWithProb(im, x1,im.height/2,x2,im.height/2, 3)
-	y2 = im.height/2 - dy2
+	y2 = im.height/2 + dy2
 	return ((x1,y1,x2,y2), pdy1 * pdy2)
 
 
@@ -387,10 +373,12 @@ while True:
 	#rects += iterateIconsMostProbable(im,rect,dist)
 		
 	if showProbs:
-		x = x1
-		for p in normProbs(dockRectProbs(im, x1,y1,x2,y2, 0)):
-			draw_rects(im, [(x,im.height-2,x+1,im.height)], probToColor(p))
-			x -= 1
+		y = im.height/2
+		for p in dockRectProbs(im, 0,im.height/2,1,im.height/2, 1):
+			print y, ":", p
+			draw_rects(im, [(0,y-1,1,y)], probToColor(p))
+			y -= 1
+		rects = []
 		
 	showImageWithRects(im, rects)		
 	
