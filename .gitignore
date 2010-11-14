@@ -6,3 +6,8 @@
 
 # temporary files
 *.png-*
+
+# these are calculated
+*.xml
+*.vec
+eclipse-icon/
