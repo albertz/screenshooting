@@ -13,8 +13,6 @@ def draw_rects(im, rects, color = cv.RGB(0,255,0)):
 	for x1,y1,x2,y2 in rects:
 		cv.Rectangle(im, (int(x1),int(y1)), (int(x2),int(y2)),
 					 color, 3, 8, 0)
-h_bins = 40
-s_bins = 40
 
 def drawImage(im):
 	cv.NamedWindow("Image", cv.CV_WINDOW_AUTOSIZE)
@@ -22,47 +20,6 @@ def drawImage(im):
 	if cv.WaitKey(0) == ord('q'): quit()
 	cv.DestroyWindow("Image")
 
-def hist_image(hist):
-	(_, max_value, _, _) = cv.GetMinMaxHistValue(hist)
-	scale = 10
-	hist_img = cv.CreateImage((h_bins*scale, s_bins*scale), 8, 3)
-
-	for h in range(h_bins):
-		for s in range(s_bins):
-			bin_val = cv.QueryHistValue_2D(hist, h, s)
-			intensity = pow(bin_val, 0.1) * 255
-			cv.Rectangle(hist_img,
-						 (h*scale, s*scale),
-						 ((h+1)*scale - 1, (s+1)*scale - 1),
-						 cv.CV_RGB(intensity, intensity, intensity), 
-						 cv.CV_FILLED)
-	return hist_img
-
-def __hs_histogram_base__hs(src, hist):
-	srcsize = cv.GetSize(src)
-	
-	# Convert to HSV
-	hsv = cv.CreateImage(srcsize, 8, 3)
-	cv.CvtColor(src, hsv, cv.CV_RGB2HSV)
-	
-	# Extract the H and S planes
-	h_plane = cv.CreateMat(srcsize[1], srcsize[0], cv.CV_8UC1)
-	s_plane = cv.CreateMat(srcsize[1], srcsize[0], cv.CV_8UC1)
-	cv.Split(hsv, h_plane, s_plane, None, None)
-	planes = [h_plane, s_plane]
-	
-	cv.CalcHist([cv.GetImage(i) for i in planes], hist, 1)
-
-def __create_default_hist__hs():
-	# hue varies from 0 (~0 deg red) to 180 (~360 deg red again */
-	h_ranges = [0, 180]
-	# saturation varies from 0 (black-gray-white) to
-	# 255 (pure spectrum color)
-	s_ranges = [0, 255]
-	ranges = [h_ranges, s_ranges]
-	hist = cv.CreateHist([h_bins, s_bins], cv.CV_HIST_ARRAY, ranges, 1)
-	cv.ClearHist(hist)
-	return hist
 
 def __hs_histogram_base(src, hist):
 	srcsize = cv.GetSize(src)
@@ -75,6 +32,7 @@ def __hs_histogram_base(src, hist):
 	#drawImage(r_plane)
 	
 	cv.CalcHist([cv.GetImage(i) for i in planes], hist, 1)
+
 
 def __create_default_hist():
 	range = [0, 255]
