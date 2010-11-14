@@ -268,37 +268,37 @@ def makeSquare(rect, newsize = None):
 	y2 += (newsize - h) / 2
 	return (x1,y1,x2,y2)
 
-def iterateRectSet(baserect, dist, rectCount = 4):
+def iterateRectSet(baserect, dist, index, rectCount = 4):
 	r = list(baserect)
-	w = r[2] - r[0]
+	D = r[index] - r[index-2]
 	num = 0
 	while True:
 		if rectCount >= 0 and num >= rectCount: return
 		yield tuple(r)
-		r[0] += w + dist
-		r[2] = r[0] + w
+		r[index-2] += D + dist
+		r[index] = r[index-2] + D
 		num += 1
 
-def probabilityOfRectset(im, baserect, dist, rectCount):
+def probabilityOfRectset(im, baserect, dist, index, rectCount):
 	minSize = 200
 	probargs = (range(0,4), minSize, 2)
 	return sum(
 		map(lambda r: DockRect(im, r).probability(*probargs),
-		iterateRectSet(baserect, dist, rectCount)) )
+			iterateRectSet(baserect, dist, index, rectCount)) )
 	
-def bestSquareRects(im, x1,y1,x2,y2, rectCount = 6):
+def bestSquareRects(im, x1,y1,x2,y2, index, rectCount = 6):
 	minSize = 400
 	while True:
 		oldrect = (x1,y1,x2,y2)
 
 		baserects = [(x1,y1,x2,y2)]
 		for i in range(0,4):
-			baserects += iterateRect(x1,y1,x2,y2, im.width, im.height, i, maxCount=25, earlierBreak=2)
+			baserects += iterateRect(x1,y1,x2,y2, im.width, im.height, i, maxCount=25)
 		baserects = map(makeSquare, baserects)
 		dockrects = []
 		for r in baserects:
 			for d in range(0,10):
-				dockrects += [(r, d, probabilityOfRectset(im, r, d, rectCount))]
+				dockrects += [(r, d, probabilityOfRectset(im, r, d, index, rectCount))]
 		
 		bestrect = max(dockrects, key = itemgetter(2))
 		#print oldrect, bestrect, rectSize(oldrect), rectSize(bestrect[0]), len(dockrects)
@@ -313,7 +313,7 @@ def bestSquareRects(im, x1,y1,x2,y2, rectCount = 6):
 def iterateIconsMostProbable(im, baserect, dist, index):
 	probs = []
 	forwardNum = 3
-	for r in iterateRectSet(baserect, dist, index -1):
+	for r in iterateRectSet(baserect, dist, index, -1):
 		prob = probabilityOfRectset(im, r, dist, index, forwardNum) / forwardNum
 		
 		probs += [probabilityOfRectset(im, r, dist, index, 1)]
@@ -373,15 +373,15 @@ while True:
 	print "left prob:", prob
 	(x1,y1,x2,y2),prob = bestDockBottom(im)
 	print "bottom prob:", prob
-	print "cache size:", len(RectProbCache)
 
 	rects += [(x1,y1,x2,y2)]
 	dockx1,dockx2 = x1,x2
 	showImageWithRects(im, rects)
 	
-	#rect,dist,prob = bestSquareRects(im, x1 + 30, im.height - 20, x1 + 35, im.height - 15)
-	#rects += iterateIconsMostProbable(im,rect,dist)
-		
+	index = 2
+	rect,dist,prob = bestSquareRects(im, x1 + 30, im.height - 20, x1 + 35, im.height - 15, index)
+	rects += iterateIconsMostProbable(im,rect,dist,index)
+	
 	if showProbs:
 		x = im.width/2
 		for p in dockRectProbs(im, im.width/2,im.height-1,im.width/2,im.height, 2):
