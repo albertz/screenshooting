@@ -80,7 +80,7 @@ def hist_for_im_rect(im, rect):
 def compareColorsInAreas(im1, rects1, im2, rects2):
 	hist1 = hist_for_im_rects(im1, rects1)
 	hist2 = hist_for_im_rects(im2, rects2)
-	histDiff = cv.CompareHist(hist1, hist2, cv.CV_COMP_BHATTACHARYYA)
+	histDiff = cv.CompareHist(hist1, hist2, cv.CV_COMP_CHISQR)
 	
 	#histDiff = 1 - histDiff
 	#print histDiff
@@ -166,8 +166,7 @@ def best_dockrect(dockrects, *probargs):
 	return rect
 
 
-def iterateRect(x1,y1,x2,y2, maxx, maxy, incindex, maxCount):
-	earlierBreak = 0
+def iterateRect(x1,y1,x2,y2, maxx, maxy, incindex, maxCount, earlierBreak = 0):
 	minx = 0
 	miny = 30
 	rect = [x1,y1,x2,y2]
@@ -280,28 +279,43 @@ def iterateRectSet(baserect, dist, index, rectCount = 4):
 		num += 1
 
 def probabilityOfRectset(im, baserect, dist, index, rectCount):
-	minSize = 200
-	probargs = (range(0,4), minSize, 2)
+	minSize = 400
+	probargs = (range(0,4), minSize, 1)
 	return sum(
 		map(lambda r: DockRect(im, r).probability(*probargs),
 			iterateRectSet(baserect, dist, index, rectCount)) )
-	
-def bestSquareRects(im, x1,y1,x2,y2, index, rectCount = 6):
-	minSize = 400
+
+def filterGoodIconRects(im, rects):
+	borderSpace = 10
+	minSize = 5
+	for r in rects:
+		x1,y1,x2,y2 = r
+		if x2 - x1 < minSize: continue
+		if y2 - y1 < minSize: continue
+		if x1 < borderSpace or x2 >= im.width - borderSpace: continue
+		if y1 < borderSpace or y2 >= im.height - borderSpace: continue
+		yield r
+
+def bestSquareRects(im, x1,y1,x2,y2, index, rectCount = 8):
+	minSize = 200
 	while True:
 		oldrect = (x1,y1,x2,y2)
 
 		baserects = [(x1,y1,x2,y2)]
-		for i in range(0,4):
-			baserects += iterateRect(x1,y1,x2,y2, im.width, im.height, i, maxCount=25)
-		baserects = map(makeSquare, baserects)
+		for s in xrange(0,5):
+			for dx in xrange(-5,5):
+				for dy in xrange(-5,5):
+					baserects += [(x1+dx-s,y1+dy-s,x2+dx,y2+dy)]
+		#baserects = map(makeSquare, baserects)
+		baserects = filterGoodIconRects(im, baserects)
+		baserects = set(baserects)
 		dockrects = []
 		for r in baserects:
 			for d in range(0,10):
 				dockrects += [(r, d, probabilityOfRectset(im, r, d, index, rectCount))]
 		
 		bestrect = max(dockrects, key = itemgetter(2))
-		#print oldrect, bestrect, rectSize(oldrect), rectSize(bestrect[0]), len(dockrects)
+		print oldrect, bestrect, rectSize(oldrect), rectSize(bestrect[0]), len(dockrects)
 		x1,y1,x2,y2 = bestrect[0]
 		if bestrect[0] == oldrect: break
 		if rectSize(bestrect[0]) >= minSize and rectSize(bestrect[0]) - rectSize(oldrect) <= 0: break
@@ -315,6 +329,7 @@ def iterateIconsMostProbable(im, baserect, dist, index):
 	forwardNum = 3
 	for r in iterateRectSet(baserect, dist, index, -1):
 		prob = probabilityOfRectset(im, r, dist, index, forwardNum) / forwardNum
+		if prob == 0: return
 		
 		probs += [probabilityOfRectset(im, r, dist, index, 1)]
 		
