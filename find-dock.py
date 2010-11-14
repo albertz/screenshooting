@@ -16,6 +16,12 @@ def draw_rects(im, rects, color = cv.RGB(0,255,0)):
 h_bins = 40
 s_bins = 40
 
+def drawImage(im):
+	cv.NamedWindow("Image", cv.CV_WINDOW_AUTOSIZE)
+	cv.ShowImage("Image", im)
+	if cv.WaitKey(0) == ord('q'): quit()
+	cv.DestroyWindow("Image")
+
 def hist_image(hist):
 	(_, max_value, _, _) = cv.GetMinMaxHistValue(hist)
 	scale = 10
@@ -32,7 +38,7 @@ def hist_image(hist):
 						 cv.CV_FILLED)
 	return hist_img
 
-def __hs_histogram_base(src, hist):
+def __hs_histogram_base__hs(src, hist):
 	srcsize = cv.GetSize(src)
 	
 	# Convert to HSV
@@ -47,7 +53,7 @@ def __hs_histogram_base(src, hist):
 	
 	cv.CalcHist([cv.GetImage(i) for i in planes], hist, 1)
 
-def __create_default_hist():
+def __create_default_hist__hs():
 	# hue varies from 0 (~0 deg red) to 180 (~360 deg red again */
 	h_ranges = [0, 180]
 	# saturation varies from 0 (black-gray-white) to
@@ -57,6 +63,26 @@ def __create_default_hist():
 	hist = cv.CreateHist([h_bins, s_bins], cv.CV_HIST_ARRAY, ranges, 1)
 	cv.ClearHist(hist)
 	return hist
+
+def __hs_histogram_base(src, hist):
+	srcsize = cv.GetSize(src)
+	
+	r_plane = cv.CreateMat(srcsize[1], srcsize[0], cv.CV_8UC1)
+	g_plane = cv.CreateMat(srcsize[1], srcsize[0], cv.CV_8UC1)
+	b_plane = cv.CreateMat(srcsize[1], srcsize[0], cv.CV_8UC1)
+	cv.Split(src, r_plane, g_plane, b_plane, None)
+	planes = [r_plane, g_plane, b_plane]
+	#drawImage(r_plane)
+	
+	cv.CalcHist([cv.GetImage(i) for i in planes], hist, 1)
+
+def __create_default_hist():
+	range = [0, 255]
+	ranges = [range, range, range]
+	hist = cv.CreateHist([40,40,40], cv.CV_HIST_ARRAY, ranges, 1)
+	cv.ClearHist(hist)
+	return hist
+
 
 def hs_histogram(src):
 	hist = __create_default_hist()
@@ -168,15 +194,18 @@ def best_dockrect(dockrects, *probargs):
 	return rect
 
 
-def iterateRect(x1,y1,x2,y2, maxx, maxy, incindex, maxCount, earlierBreak = 30):
+def iterateRect(x1,y1,x2,y2, maxx, maxy, incindex, maxCount):
+	earlierBreak = 0
+	minx = 0
+	miny = 30
 	rect = [x1,y1,x2,y2]
 	count = 0
 	while True:
 		x1,y1,x2,y2 = rect
-		if x1 < 0 or x1 >= maxx: return
-		if x2 < 0 or x2 > maxx: return
-		if y1 < 0 or y1 >= maxy: return
-		if y2 < 0 or y2 > maxy: return
+		if x1 < minx or x1 >= maxx: return
+		if x2 < minx or x2 > maxx: return
+		if y1 < miny or y1 >= maxy: return
+		if y2 < miny or y2 > maxy: return
 		if incindex == 0 and rect[incindex] < earlierBreak: return
 		if incindex == 2 and rect[incindex] >= maxx - earlierBreak: return
 		if incindex == 1 and rect[incindex] < earlierBreak: return
@@ -320,8 +349,8 @@ def iterateIconsMostProbable(im, baserect, dist, index):
 		
 
 #files = glob("2010-10-*.png")
-#files = glob("2010-10-11.*.png") # bottom dock with eclipse
-files = glob("2010-10-28.*.png") # left dock with eclipse
+files = glob("2010-10-11.*.png") # bottom dock with eclipse
+#files = glob("2010-10-28.*.png") # left dock with eclipse
 i = 0
 random.shuffle(files)
 
@@ -364,6 +393,10 @@ while True:
 
 
 	(x1,y1,x2,y2),prob = bestDockLeft(im)
+	print "left prob:", prob
+	(x1,y1,x2,y2),prob = bestDockBottom(im)
+	print "bottom prob:", prob
+
 
 	rects += [(x1,y1,x2,y2)]
 	dockx1,dockx2 = x1,x2
@@ -374,10 +407,10 @@ while True:
 		
 	if showProbs:
 		y = im.height/2
-		for p in dockRectProbs(im, 0,im.height/2,1,im.height/2, 1):
+		for p in dockRectProbs(im, 0,im.height/2,1,im.height/2, 3):
 			print y, ":", p
 			draw_rects(im, [(0,y-1,1,y)], probToColor(p))
-			y -= 1
+			y += 1
 		rects = []
 		
 	showImageWithRects(im, rects)		
