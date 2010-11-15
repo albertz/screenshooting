@@ -39,7 +39,7 @@ def __hs_histogram_base(src, hist):
 def __create_default_hist__pool_entry():
 	range = [0, 255]
 	ranges = [range, range, range]
-	hist = cv.CreateHist([40,40,40], cv.CV_HIST_ARRAY, ranges, 1)
+	hist = cv.CreateHist([10,10,10], cv.CV_HIST_ARRAY, ranges, 1)
 	return hist
 
 # 2 entries should be enough for all our use cases
@@ -71,7 +71,7 @@ def hist_for_im_rects(im, rects):
 		cv.SetImageROI(im, rect)
 		__hs_histogram_base(im, hist)
 	cv.SetImageROI(im, oldROI)
-	cv.NormalizeHist(hist, 1.0)
+	#cv.NormalizeHist(hist, 1.0)
 	return hist
 
 def hist_for_im_rect(im, rect):
@@ -80,7 +80,7 @@ def hist_for_im_rect(im, rect):
 def compareColorsInAreas(im1, rects1, im2, rects2):
 	hist1 = hist_for_im_rects(im1, rects1)
 	hist2 = hist_for_im_rects(im2, rects2)
-	histDiff = cv.CompareHist(hist1, hist2, cv.CV_COMP_CHISQR)
+	histDiff = cv.CompareHist(hist1, hist2, cv.CV_COMP_BHATTACHARYYA)
 	
 	#histDiff = 1 - histDiff
 	#print histDiff
@@ -107,12 +107,20 @@ class DockRect:
 		self.im = im
 		self.rect = rect
 	
-	def surrounding_rects(self, space):
+	def surrounding_rects(self, space, indices):
 		x1,y1,x2,y2 = self.rect
-		r1 = (x1 - space, y1, x1, y2) # left
-		r2 = (x1, y1 - space, x2, y1) # top
-		r3 = (x2, y1, x2 + space , y2) # right
-		r4 = (x1, y2, x2, y2 + space) # bottom
+		r1 = (x1 - ((0 in indices) and space or 0), y1, x1, y2) # left
+		r2 = (
+			x1 - ((0 in indices) and space or 0),
+			y1 - ((1 in indices) and space or 0),
+			x2 + ((2 in indices) and space or 0),
+			y1) # top
+		r3 = (x2, y1, x2 + ((2 in indices) and space or 0), y2) # right
+		r4 = (
+			x1 - ((0 in indices) and space or 0),
+			y2,
+			x2 + ((2 in indices) and space or 0),
+			y2 + ((3 in indices) and space or 0)) # bottom
 		return [ r1, r2, r3, r4 ]
 	
 	def inner_rects(self, indices):
@@ -129,13 +137,13 @@ class DockRect:
 	def probability(self, indices = xrange(0,4), minSize = None, surroundingSpace = None):
 		if not minSize: minSize = 30
 		innerRects = self.inner_rects(indices)
-		if not surroundingSpace: surroundingSpace = 30 #surroundingSpace = max(1, rectsSizeSum(innerRects))
+		if not surroundingSpace: surroundingSpace = 2 #surroundingSpace = max(1, rectsSizeSum(innerRects))
 		
 		cacheIndex = (tuple(self.rect), tuple(indices), minSize, surroundingSpace)
 		global RectProbCache
 		if cacheIndex in RectProbCache: return RectProbCache[cacheIndex]
 		
-		outerRects = index_filter(self.surrounding_rects(surroundingSpace), *indices)
+		outerRects = self.surrounding_rects(surroundingSpace, indices)
 		if rectsSizeSum(innerRects) < minSize: return 0
 		if rectsSizeSum(outerRects) < min(surroundingSpace, minSize): return 0
 		
@@ -143,6 +151,13 @@ class DockRect:
 
 		RectProbCache[cacheIndex] = histDiff
 		return histDiff # the higher the diff, the better the probalitity (we want to have the best sepeaation)
+
+
+# TODO ... (not used atm)
+class IconRectSet:
+	def __init__(self, im):
+		self.im = im
+		
 
 def best_avg_dockrect(dockrects, *probargs):
 	rects = [ dockrect.rect for dockrect in dockrects ]
@@ -189,7 +204,7 @@ def iterateRect(x1,y1,x2,y2, maxx, maxy, incindex, maxCount, earlierBreak = 0):
 def dockRectProbs(im, x1, y1, x2, y2, incindex, maxCount = None, minSize = None):
 	if not maxCount: maxCount = max(im.width,im.height)
 	dockrects = [DockRect(im, (_x1,_y1,_x2,_y2)) for _x1,_y1,_x2,_y2 in iterateRect(x1,y1,x2,y2, im.width, im.height, incindex, maxCount)]
-	return [ dockrect.probability([incindex], minSize) for dockrect in dockrects ]
+	return [ dockrect.probability([incindex], minSize, surroundingSpace=30) for dockrect in dockrects ]
 
 def normProbsWithParams(probs):
 	if len(probs) == 0: return (probs, 0, 0)
@@ -286,7 +301,7 @@ def probabilityOfRectset(im, baserect, dist, index, rectCount):
 			iterateRectSet(baserect, dist, index, rectCount)) )
 
 def filterGoodIconRects(im, rects):
-	borderSpace = 10
+	borderSpace = 12
 	minSize = 5
 	for r in rects:
 		x1,y1,x2,y2 = r
@@ -296,30 +311,43 @@ def filterGoodIconRects(im, rects):
 		if y1 < borderSpace or y2 >= im.height - borderSpace: continue
 		yield r
 
-def bestSquareRects(im, x1,y1,x2,y2, index, rectCount = 8):
-	minSize = 200
-	while True:
-		oldrect = (x1,y1,x2,y2)
+def rectCenter(r):
+	x1,y1,x2,y2 = r
+	return ((x1+x2)/2, (y1+y2)/2)
 
-		baserects = [(x1,y1,x2,y2)]
-		for s in xrange(0,5):
-			for dx in xrange(-5,5):
-				for dy in xrange(-5,5):
-					baserects += [(x1+dx-s,y1+dy-s,x2+dx,y2+dy)]
+def bestSquareRects(im, x1,y1,x2,y2, index):
+	rectCount = 4
+	minSize = 200
+	step = 5
+	dist = 10
+	while True:
+		size = x2-x1
+		oldrect = (x1,y1,x2,y2)
+		x,y = rectCenter(oldrect)
+
+		baserects = []
+		for s in xrange(size+step*step,size-1,-1):
+			for dx in xrange(-step,step):
+				for dy in xrange(-step*2,step*2):
+					baserects += [(x+dx-s/2,y+dy-s/2,x+dx+s/2,y+dy+s/2)]
 		#baserects = map(makeSquare, baserects)
 		baserects = filterGoodIconRects(im, baserects)
 		baserects = set(baserects)
 		dockrects = []
 		for r in baserects:
-			for d in range(0,10):
+			for d in range(max(0, dist - 4*step), dist + 4*step, 1):
 				dockrects += [(r, d, probabilityOfRectset(im, r, d, index, rectCount))]
 		
-		bestrect = max(dockrects, key = itemgetter(2))
-		print oldrect, bestrect, rectSize(oldrect), rectSize(bestrect[0]), len(dockrects)
-		x1,y1,x2,y2 = bestrect[0]
+		bestrect,dist,bestprob = max(dockrects, key = itemgetter(2))
+		x1,y1,x2,y2 = bestrect
+		size = x2-x1
+		#print oldrect, bestrect, rectSize(oldrect), rectSize(bestrect), dist, bestprob, len(dockrects)
 		if bestrect[0] == oldrect: break
-		if rectSize(bestrect[0]) >= minSize and rectSize(bestrect[0]) - rectSize(oldrect) <= 0: break
-	return bestrect
+		#if rectSize(bestrect[0]) >= minSize and rectSize(bestrect[0]) - rectSize(oldrect) <= 0: break
+		step -= 1
+		#rectCount += 1
+		if step < 1: break
+	return (bestrect,dist,bestprob)
 
 
 
@@ -329,13 +357,15 @@ def iterateIconsMostProbable(im, baserect, dist, index):
 	forwardNum = 3
 	for r in iterateRectSet(baserect, dist, index, -1):
 		prob = probabilityOfRectset(im, r, dist, index, forwardNum) / forwardNum
-		if prob == 0: return
+		if prob == 0:
+			print r, rectSize(r), dist, index, forwardNum, prob
+			return
 		
 		probs += [probabilityOfRectset(im, r, dist, index, 1)]
 		
 		num = len(probs)
 		#print num, ":", vecAverage(probs), prob, vecAverage(probs) / prob
-		if vecAverage(probs) / prob > 1.3: return
+		if vecAverage(probs) / prob > 1.4: return
 		#if num > 20: return
 		
 		yield r
