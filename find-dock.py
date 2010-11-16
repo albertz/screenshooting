@@ -386,7 +386,7 @@ def iterateIconsMostProbable(im, dockrect, baserect, dist, index, probs = []):
 			lambda r: probabilityOfRectset(im, r, dist, index, forwardNum) / forwardNum)
 		
 		if prob == 0:
-			print r, rectSize(r), dist, index, forwardNum, prob
+			#print r, rectSize(r), dist, index, forwardNum, prob
 			return
 		
 		probs += [probabilityOfRectset(im, r, dist, index, 1)]
@@ -403,12 +403,6 @@ def iterateIconsMostProbable(im, dockrect, baserect, dist, index, probs = []):
 		r[index] = r[index-2] + D
 		
 
-files = glob("*.png")
-#files = glob("2010-10-*.png")
-#files = glob("2010-10-11.*.png") # bottom dock with eclipse
-#files = glob("2010-10-28.*.png") # left dock with eclipse
-i = 0
-random.shuffle(files)
 
 def showImageWithRects(im, rects):
 	imcopy = cv.CloneImage(im)
@@ -423,6 +417,7 @@ def vecSum(r1, r2):
 	return map(lambda (x1,x2): x1 + x2, zip(r1,r2))
 
 def vecAverage(v):
+	if len(v) == 0: return 0
 	return sum(v) / len(v)
 
 def rectMultSize(rect, f):
@@ -436,29 +431,31 @@ def rectMultSize(rect, f):
 	y1 -= (newh - h) / 2
 	y2 += (newh - h) / 2
 	return (x1,y1,x2,y2)	
-	
-showProbs = False
-while True:
-	f = files[i]
-	print f
-	im = cv.LoadImage(f)
 
+
+ShowImage = False
+Debug = False
+
+
+def getDockIcons(im):
+	global RectProbCache
+	RectProbCache = dict()
 	rects = []
-	showImageWithRects(im, rects)		
+	if ShowImage: showImageWithRects(im, rects)		
 
 	dockrects = [None,None,None]
 	dockprobs = [None,None,None]
 	dockrects[0],dockprobs[0] = bestDockLeft(im)
-	showImageWithRects(im, [dockrects[0]])
+	if ShowImage: showImageWithRects(im, [dockrects[0]])
 	dockrects[1],dockprobs[1] = bestDockBottom(im)
-	showImageWithRects(im, [dockrects[1]])
+	if ShowImage: showImageWithRects(im, [dockrects[1]])
 	dockrects[2],dockprobs[2] = bestDockRight(im)
-	showImageWithRects(im, [dockrects[2]])
+	if ShowImage: showImageWithRects(im, [dockrects[2]])
 	iconrects = [None,None,None]
 	
 	for index in [0,1,2]:
 		x1,y1,x2,y2 = dockrects[index]
-		showImageWithRects(im, rects)
+		if ShowImage: showImageWithRects(im, rects)
 
 		dirindex = (index == 1) and 2 or 3
 		dist1 = 30
@@ -478,9 +475,9 @@ while True:
 		bordersize = (im.width,im.height)[dirindex-2]
 		relativedistfromcenter = float(rectCenter(dockrects[index])[dirindex-2] - bordersize/2) / (bordersize/2)
 		posprob = 1 - abs(relativedistfromcenter)
-		posprob *= 5 # it says much if the dock is not in the center...
-		print index, "prob:", prob, firsticonprob, vecAverage(probs), dockprobs[index], posprob, posprob * prob * firsticonprob * dockprobs[index]
-		dockprobs[index] *= firsticonprob * prob * posprob
+		finalprob = (posprob ** 5) * (max(prob, firsticonprob) ** 0.5) * (dockprobs[index] ** 6)
+		if Debug: print index, "prob:", prob, firsticonprob, vecAverage(probs), dockprobs[index], posprob, finalprob
+		dockprobs[index] = finalprob
 		
 		#rects += iconrects[index]
 		#showImageWithRects(im, rects)
@@ -490,24 +487,40 @@ while True:
 		rects += [dockrects[dockindex]]
 		rects += iconrects[dockindex]	
 	
-	
-	if showProbs:
-		x = im.width/2
-		for p in dockRectProbs(im, im.width/2,im.height-1,im.width/2,im.height, 2):
-			print x, ":", p
-			draw_rects(im, [(x-1,im.height-1,x,im.height)], probToColor(p))
-			x += 1
-		rects = []
+	#if showProbs:
+	#	x = im.width/2
+	#	for p in dockRectProbs(im, im.width/2,im.height-1,im.width/2,im.height, 2):
+	#		print x, ":", p
+	#		draw_rects(im, [(x-1,im.height-1,x,im.height)], probToColor(p))
+	#		x += 1
+	#	rects = []
 		
-	showImageWithRects(im, rects)		
+	if ShowImage: showImageWithRects(im, rects)		
 	RectProbCache = dict()
-	im = None
-	rects = None
+
+	if dockprobs[dockindex] > 0:
+		return iconrects[dockindex]
+	return []
+
+if __name__ == "__main__":
+	files = glob("*.png")
+	#files = glob("2010-10-*.png")
+	#files = glob("2010-10-11.*.png") # bottom dock with eclipse
+	#files = glob("2010-10-28.*.png") # left dock with eclipse
+	i = 0
+	random.shuffle(files)
+
+	ShowImage = True
+	showProbs = False
+	while True:
+		f = files[i]
+		print f
+		im = cv.LoadImage(f)
+		getDockIcons(im)
 	
-	key = cv.WaitKey(0)
-	if key in [27, ord('q')]: quit()
-	elif key == 63235: i = min(i + 1, len(files))
-	elif key == 63234: i = max(i - 1, 0)
-	elif key == ord('p'): showProbs = not showProbs
-	else: print "key", key, "unknown"
-	
+		key = cv.WaitKey(0)
+		if key in [27, ord('q')]: quit()
+		elif key == 63235: i = min(i + 1, len(files))
+		elif key == 63234: i = max(i - 1, 0)
+		elif key == ord('p'): showProbs = not showProbs
+		else: print "key", key, "unknown"
