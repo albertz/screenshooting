@@ -71,7 +71,7 @@ def hist_for_im_rects(im, rects):
 		cv.SetImageROI(im, rect)
 		__hs_histogram_base(im, hist)
 	cv.SetImageROI(im, oldROI)
-	#cv.NormalizeHist(hist, 1.0)
+	cv.NormalizeHist(hist, 1.0)
 	return hist
 
 def hist_for_im_rect(im, rect):
@@ -80,7 +80,9 @@ def hist_for_im_rect(im, rect):
 def compareColorsInAreas(im1, rects1, im2, rects2):
 	hist1 = hist_for_im_rects(im1, rects1)
 	hist2 = hist_for_im_rects(im2, rects2)
-	histDiff = cv.CompareHist(hist1, hist2, cv.CV_COMP_BHATTACHARYYA)
+	method = cv.CV_COMP_CHISQR
+	#method = cv.CV_COMP_BHATTACHARYYA
+	histDiff = cv.CompareHist(hist1, hist2, method)
 	
 	#histDiff = 1 - histDiff
 	#print histDiff
@@ -315,8 +317,14 @@ def rectCenter(r):
 	x1,y1,x2,y2 = r
 	return ((x1+x2)/2, (y1+y2)/2)
 
+def frange(start, end, step):
+	x = start
+	while x < end:
+		yield x
+		x += step
+
 def bestSquareRects(im, x1,y1,x2,y2, index):
-	rectCount = 4
+	rectCount = 8
 	minSize = 200
 	step = 5
 	dist = 10
@@ -330,32 +338,37 @@ def bestSquareRects(im, x1,y1,x2,y2, index):
 			for dx in xrange(-step,step):
 				for dy in xrange(-step*2,step*2):
 					baserects += [(x+dx-s/2,y+dy-s/2,x+dx+s/2,y+dy+s/2)]
+		baserects += [oldrect]
 		#baserects = map(makeSquare, baserects)
 		baserects = filterGoodIconRects(im, baserects)
 		baserects = set(baserects)
 		dockrects = []
 		for r in baserects:
-			for d in range(max(0, dist - 4*step), dist + 4*step, 1):
+			for d in frange(max(0, dist - 4*step), dist + 4*step, 0.5):
 				dockrects += [(r, d, probabilityOfRectset(im, r, d, index, rectCount))]
 		
 		bestrect,dist,bestprob = max(dockrects, key = itemgetter(2))
 		x1,y1,x2,y2 = bestrect
 		size = x2-x1
-		#print oldrect, bestrect, rectSize(oldrect), rectSize(bestrect), dist, bestprob, len(dockrects)
+		print oldrect, bestrect, rectSize(oldrect), rectSize(bestrect), dist, bestprob, len(dockrects)
 		if bestrect[0] == oldrect: break
 		#if rectSize(bestrect[0]) >= minSize and rectSize(bestrect[0]) - rectSize(oldrect) <= 0: break
 		step -= 1
 		#rectCount += 1
 		if step < 1: break
-	return (bestrect,dist,bestprob)
+	return (bestrect,dist,bestprob/rectCount)
 
 
 
 
-def iterateIconsMostProbable(im, baserect, dist, index):
-	probs = []
+def iterateIconsMostProbable(im, baserect, dist, index, probs = []):
 	forwardNum = 3
 	for r in iterateRectSet(baserect, dist, index, -1):
+		if index == 0 and r[0] <= 0: return
+		if index == 1 and r[1] <= 0: return
+		if index == 2 and r[2] >= im.width: return
+		if index == 3 and r[3] >= im.height: return
+
 		prob = probabilityOfRectset(im, r, dist, index, forwardNum) / forwardNum
 		if prob == 0:
 			print r, rectSize(r), dist, index, forwardNum, prob
@@ -364,16 +377,16 @@ def iterateIconsMostProbable(im, baserect, dist, index):
 		probs += [probabilityOfRectset(im, r, dist, index, 1)]
 		
 		num = len(probs)
-		#print num, ":", vecAverage(probs), prob, vecAverage(probs) / prob
-		if vecAverage(probs) / prob > 1.4: return
-		#if num > 20: return
+		print num, ":", vecAverage(probs), prob, vecAverage(probs) / prob
+		#if vecAverage(probs) / prob > 1.4: return
+		if num > 20: return
 		
 		yield r
 		
 
 #files = glob("2010-10-*.png")
-files = glob("2010-10-11.*.png") # bottom dock with eclipse
-#files = glob("2010-10-28.*.png") # left dock with eclipse
+#files = glob("2010-10-11.*.png") # bottom dock with eclipse
+files = glob("2010-10-28.*.png") # left dock with eclipse
 i = 0
 random.shuffle(files)
 
@@ -413,19 +426,46 @@ while True:
 	rects = []
 	showImageWithRects(im, rects)		
 
-
-	(x1,y1,x2,y2),prob = bestDockLeft(im)
-	print "left prob:", prob
-	(x1,y1,x2,y2),prob = bestDockBottom(im)
-	print "bottom prob:", prob
-
-	rects += [(x1,y1,x2,y2)]
-	dockx1,dockx2 = x1,x2
-	showImageWithRects(im, rects)
+	dockrects = [None,None,None]
+	dockprobs = [None,None,None]
+	dockrects[0],dockprobs[0] = bestDockLeft(im)
+	showImageWithRects(im, [dockrects[0]])
+	dockrects[1],dockprobs[1] = bestDockBottom(im)
+	showImageWithRects(im, [dockrects[1]])
+	dockrects[2],dockprobs[2] = bestDockRight(im)
+	showImageWithRects(im, [dockrects[2]])
+	iconrects = [None,None,None]
 	
-	index = 2
-	rect,dist,prob = bestSquareRects(im, x1 + 30, im.height - 20, x1 + 35, im.height - 15, index)
-	rects += iterateIconsMostProbable(im,rect,dist,index)
+	for index in [0]: #[0,1,2]:
+		x1,y1,x2,y2 = dockrects[index]
+		showImageWithRects(im, rects)
+
+		dirindex = (index == 1) and 2 or 3
+		dist1 = 30
+		dist2 = 30
+		size = 5
+		if index == 1: x1,y1,x2,y2 = x1 + dist1, im.height - dist2, x1 + dist1 + size, im.height - dist2 + size
+		if index == 0: x1,y1,x2,y2 = dist1 - size, y1 + dist2, dist1, y1 + dist2 + size
+		if index == 2: x1,y1,x2,y2 = im.width - dist1, y1 + dist2, im.width - dist1 + size, y1 + dist2 + size
+
+		rect,dist,prob = bestSquareRects(im, x1,y1,x2,y2, dirindex)
+		probs = []
+		iconrects[index] = list(iterateIconsMostProbable(im,rect,dist,dirindex,probs))
+		if len(iconrects[index]) < 5:
+			firsticonprob = 0
+		else:
+			firsticonprob = probabilityOfRectset(im, rect, dist, dirindex, 1)
+		print index, "prob:", prob, firsticonprob, vecAverage(probs), dockprobs[index], firsticonprob * dockprobs[index]
+		dockprobs[index] *= firsticonprob
+		
+		rects += iconrects[index]
+		showImageWithRects(im, rects)
+	
+	dockindex = argmax(dockprobs)
+	#if dockprobs[dockindex] > 0:
+	#	rects += [dockrects[dockindex]]
+	#	rects += iconrects[dockindex]	
+	
 	
 	if showProbs:
 		x = im.width/2
