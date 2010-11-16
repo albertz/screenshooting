@@ -7,7 +7,6 @@ from itertools import *
 from operator import itemgetter
 import random
 
-cv.NamedWindow('Screenshot', cv.CV_WINDOW_AUTOSIZE)
 
 def draw_rects(im, rects, color = cv.RGB(0,255,0)):
 	for x1,y1,x2,y2 in rects:
@@ -403,10 +402,15 @@ def iterateIconsMostProbable(im, dockrect, baserect, dist, index, probs = []):
 		r[index] = r[index-2] + D
 		
 
+HaveWindow = False
 
 def showImageWithRects(im, rects):
 	imcopy = cv.CloneImage(im)
 	draw_rects(imcopy, rects)
+	global HaveWindow
+	if not HaveWindow:
+		cv.NamedWindow('Screenshot', cv.CV_WINDOW_AUTOSIZE)
+		HaveWindow = True
 	cv.ShowImage("Screenshot", imcopy)
 	cv.WaitKey(1)
 
@@ -438,6 +442,9 @@ Debug = False
 
 
 def getDockIcons(im):
+	if isinstance(im, str):
+		im = cv.LoadImage(im)
+		
 	global RectProbCache
 	RectProbCache = dict()
 	rects = []
@@ -515,8 +522,7 @@ if __name__ == "__main__":
 	while True:
 		f = files[i]
 		print f
-		im = cv.LoadImage(f)
-		getDockIcons(im)
+		getDockIcons(f)
 	
 		key = cv.WaitKey(0)
 		if key in [27, ord('q')]: quit()
