@@ -1,279 +1,192 @@
 #!/usr/bin/python
 
-import cv
-import numpy as np
-import scipy.spatial as sp
 from glob import glob
-import math
-
-def bwImage(im):
-	if len(im.channels) == 1: return im
-	return cv.cvtColor(im, cv.CV_RGB2GRAY)
-
-class MatchableImage:
-	def __init__(self, im):
-		self.image = im
-		(self.keypoints, self.descriptors) = cv.ExtractSURF(im, None, cv.CreateMemStorage(), (0, 300, 3, 4))
-		#for ((x, y), laplacian, size, dir, hessian) in self.keypoints:
-			#print "x=%d y=%d laplacian=%d size=%d dir=%f hessian=%f" % (x, y, laplacian, size, dir, hessian)
-		#print self.descriptors
-		
-	def findFeatures(self, alg_name):
-		detector = cv.createFeatureDetector(alg_name)
-		self.features = detector.detect(bwImage(self.image))
-		
-	def findDescriptors(self, alg_name):
-		grayim = bwImage(self.image)
-		descriptorExtractor = cv.createDescriptorExtractor(alg_name)
-		self.descriptors = descriptorExtractor.compute(grayim, features)
-		
-	def trainMatcher(self, alg_name): pass
-	def matchTo(self, im):
-		pass
+import random
+import cv
+from math import *
+dock = __import__("find-dock")
 
 
-def compareSURFDescriptors(d1, d2, best, length):
-	total_cost = 0
-	assert( length % 4 == 0 )
-	for i in xrange(0, length, 4):
-		t0 = d1[i] - d2[i]
-		t1 = d1[i+1] - d2[i+1]
-		t2 = d1[i+2] - d2[i+2]
-		t3 = d1[i+3] - d2[i+3]
-		total_cost += t0*t0 + t1*t1 + t2*t2 + t3*t3
-		if total_cost > best:
-			break
-	return total_cost
 
-def naiveNearestNeighbor(vec, laplacian, model_keypoints, model_descriptors):
-	length = model_descriptors.elem_size/sizeof(c_float)
-	neighbor = -1
-	dist1 = 1e6
-	dist2 = 1e6
-	kp_arr = model_keypoints.asarray(CvSURFPoint)
-	mv_arr = model_descriptors.asarrayptr(POINTER(c_float))
 
-	for i in xrange(model_descriptors.total):
-		if  laplacian != kp_arr[i].laplacian:
-			continue
-		d = compareSURFDescriptors(vec, mv_arr[i], dist2, length)
-		if d < dist1:
-			dist2 = dist1
-			dist1 = d
-			neighbor = i
-		elif d < dist2:
-			dist2 = d
+# we need this hack because there is a memleak in cv.CreateHist
 
-	if dist1 < 0.6*dist2:
-		return neighbor
-	return -1
+def __create_default_hist__pool_entry():
+	range = [0, 255]
+	ranges = [range, range, range]
+	hist = cv.CreateHist([10,10,10], cv.CV_HIST_ARRAY, ranges, 1)
+	return hist
 
-def findPairs(objectKeypoints, objectDescriptors, imageKeypoints, imageDescriptors):
-	ptpairs = []
-	kp_arr = objectKeypoints.asarray(CvSURFPoint)
-	de_arr = objectDescriptors.asarrayptr(POINTER(c_float))
+# 2 entries should be enough for all our use cases
+__hist_pool = [ __create_default_hist__pool_entry() for i in xrange(2) ]
+__hist_pool_index = 0
 
-	for i in xrange(objectDescriptors.total):
-		nn = naiveNearestNeighbor( de_arr[i], kp_arr[i].laplacian, imageKeypoints, imageDescriptors );
-		if nn >= 0:
-			ptpairs.append((i,nn))
+def __create_default_hist():
+	global __hist_pool, __hist_pool_index
+	hist = __hist_pool[__hist_pool_index]
+	__hist_pool_index += 1
+	__hist_pool_index %= len(__hist_pool)
+	cv.ClearHist(hist)
+	return hist
+	
+	
+	
+def __hs_histogram_base(src, hist):
+	srcsize = cv.GetSize(src)
+	
+	r_plane = cv.CreateMat(srcsize[1], srcsize[0], cv.CV_8UC1)
+	g_plane = cv.CreateMat(srcsize[1], srcsize[0], cv.CV_8UC1)
+	b_plane = cv.CreateMat(srcsize[1], srcsize[0], cv.CV_8UC1)
+	cv.Split(src, r_plane, g_plane, b_plane, None)
+	planes = [r_plane, g_plane, b_plane]
+	#drawImage(r_plane)
+	
+	cv.CalcHist([cv.GetImage(i) for i in planes], hist, 1)
 
-	return ptpairs
 
-# a rough implementation for object location
-def locatePlanarObject(objectKeypoints, objectDescriptors, imageKeypoints, imageDescriptors, src_corners, dst_corners):
-	ptpairs = findPairs(objectKeypoints, objectDescriptors, imageKeypoints, imageDescriptors)
-	n = len(ptpairs)
-	if n < 4:
-		return 0
+def hist_for_im_rects(im, rects):
+	hist = __create_default_hist()
+	oldROI = cv.GetImageROI(im)
+	for x1,y1,x2,y2 in rects:
+		rect = ( max(int(x1),0), max(int(y1),0), min(int(x2),im.width), min(int(y2),im.height) )
+		if rect[0] >= rect[2] or rect[1] >= rect[3]: continue
+		rect = (rect[0], rect[1], rect[2]-rect[0], rect[3]-rect[1])
+		cv.SetImageROI(im, rect)
+		__hs_histogram_base(im, hist)
+	cv.SetImageROI(im, oldROI)
+	cv.NormalizeHist(hist, 1.0)
+	return hist
 
-	ok_arr = objectKeypoints.asarray(CvSURFPoint)
-	pt1 = cvCreateMatFromCvPoint2D32fList([ok_arr[x[0]].pt for x in ptpairs])
-	ik_arr = imageKeypoints.asarray(CvSURFPoint)
-	pt2 = cvCreateMatFromCvPoint2D32fList([ik_arr[x[1]].pt for x in ptpairs])
-	try:
-		h = cvFindHomography( pt1, pt2, method=CV_RANSAC, ransacReprojThreshold=5 )[0]
-	except RuntimeError:
-		return 0
+def hist_for_im_rect(im, rect):
+	return hist_for_im_rects(im, [rect])
 
-	for i in xrange(4):
-		x = src_corners[i].x
-		y = src_corners[i].y
-		Z = 1./(h[2,0]*x + h[2,1]*y + h[2,2])
-		X = (h[0,0]*x + h[0,1]*y + h[0,2])*Z
-		Y = (h[1,0]*x + h[1,1]*y + h[1,2])*Z
-		dst_corners[i] = cvPoint(cvRound(X), cvRound(Y))
+def compareColorsInAreas(im1, rects1, im2, rects2):
+	hist1 = hist_for_im_rects(im1, rects1)
+	hist2 = hist_for_im_rects(im2, rects2)
+	#method = cv.CV_COMP_CHISQR
+	method = cv.CV_COMP_BHATTACHARYYA
+	histDiff = cv.CompareHist(hist1, hist2, method)
+	
+	#histDiff = 1 - histDiff
+	#print histDiff
+	return histDiff
+	
 
-	return 1
+def subarea(rect, ix, iy, n):
+	n = float(n)
+	x1,y1,x2,y2 = rect
+	w = x2 - x1
+	h = y2 - y1
+	w /= n
+	h /= n
+	x1,y1 = x1 + ix*w, y1 + iy*h
+	x2,y2 = x1 + w, y2 + h
+	return (x1,y1,x2,y2)
 
-iconim = MatchableImage(cv.LoadImageM("eclipse-icon.png", cv.CV_LOAD_IMAGE_GRAYSCALE))
-#iconim.findFeatures("SURF")
-#iconim.trainMatcher("SURF")
+def resizedImage(im, w, h):
+	newim = cv.CreateImage((w,h), cv.IPL_DEPTH_8U, im.channels)
+	interpol = cv.CV_INTER_CUBIC
+	#interpol = CV_INTER_LINEAR
+	#interpol = CV_INTER_AREA
+	cv.Resize(im, newim, interpol)
+	return newim
 
-def clone(something):
-	if something.__class__ == cv.cvmat:
-		return cv.CloneMat(something)
+def subImageScaled(im, rect, w, h):
+	rect = (rect[0], rect[1], rect[2]-rect[0], rect[3]-rect[1])
+	cv.SetImageROI(im, rect)
+	return resizedImage(im, w, h)
+	
+def compareAreas(im1, rect1, im2, rect2):
+	n = 10
+	c = 0
+	im1 = subImageScaled(im1, rect1, n, n)
+	im2 = subImageScaled(im2, rect2, n, n)
+	
+	values = []
+	for x in range(n):
+		for y in range(n):
+			c1 = cv.Get2D(im1, x, y)
+			c2 = cv.Get2D(im2, x, y)
+			#print x,",",y,":",c1,c2
+			if c2[0:3] == (255,255,255): continue
+
+			values += [ sqrt( sum( [ (abs(c1[i] - c2[i]) / 255.0) ** 2 for i in [0,1,2] ] ) ) ]
+	#print values
+	return sqrt(sum([ x*x for x in values ]))
+	return sum(values) / len(values)
+
+def compareAreasVariable(im1, rect1, im2):
+	values = []
+	step = 2
+	n = 10
+	for x1 in xrange(0,n,step):
+		for y1 in xrange(0,n,step):
+			for x2 in xrange(im2.width-n+1, im2.width+1, step):
+				for y2 in xrange(im2.height-n+1, im2.height+1, step):
+					values += [ (compareAreas(im1, rect1, im2, (x1,y1,x2,y2)), (x1,y1,x2,y2)) ]
+	return min(values)
+
+def diffImage(im1, rect1, im2, rect2):
+	w,h = 20,20
+	im1 = subImageScaled(im1, rect1, w, h)
+	im2 = subImageScaled(im2, rect2, w, h)
+	newim = cv.CreateImage((w,h), cv.IPL_DEPTH_8U, 3)
+	for x in xrange(w):
+		for y in xrange(h):
+			c1 = cv.Get2D(im1, x, y)[0:3]
+			c2 = cv.Get2D(im2, x, y)[0:3]
+			if c2[0:3] == (255,255,255): newc = (0,0,0)
+			else: newc = tuple( abs(c1[i] - c2[i]) for i in [0,1,2] )
+			cv.Set2D(newim, x, y, newc)
+	return newim
+
+#files = glob("*.png")
+#files = glob("2010-10-*.png")
+#files = glob("2010-10-11.*.png") # bottom dock with eclipse
+files = glob("2010-10-28.*.png") # left dock with eclipse
+random.shuffle(files)
+
+#cv.NamedWindow("icon", cv.CV_WINDOW_AUTOSIZE)
+
+def showImage(im, rect = None, wait = True, window = "icon"):
+	if rect:
+		rect = (rect[0], rect[1], rect[2]-rect[0], rect[3]-rect[1])
+		cv.SetImageROI(im, rect)
+		imcopy = cv.CloneImage(im)
 	else:
-		return cv.CloneImage(something)
-
-def draw_surf2(image, keypoints, colors):
-	rimage = clone(image)
-	for i, k in enumerate(keypoints):
-		loc, lap, size, d, hess = k
-		loc = tuple(np.array(np.round(loc), dtype='int').tolist())
-		c = tuple(np.matrix(colors[:,i],dtype='int').T.A1)
-		color = (int(c[0]), int(c[1]), int(c[2]))
-		#cv.Circle(rimage, loc, int(round(size/2.)), color, 1, cv.CV_AA)
-		cv.Circle(rimage, loc, 5, color, 1, cv.CV_AA)
-	return rimage
-
-def draw_surf(image, keypoints, color):
-	rimage = clone(image)
-
-	for loc, lap, size, d, hess in keypoints:
-		loc = tuple(np.array(np.round(loc), dtype='int').tolist())
-		circ_rad = int(round(size/4.))
-		cv.Circle(rimage, loc, circ_rad, color, 1, cv.CV_AA)
-		cv.Circle(rimage, loc, 2, color, -1, cv.CV_AA)
-
-		drad = math.radians(d)
-		line_len = circ_rad
-		loc_end = (np.matrix(np.round( circ_rad * np.matrix([np.cos(drad), np.sin(drad)]).T + np.matrix(loc).T), dtype='int')).A1.tolist()
-		cv.Line(rimage, loc, tuple(loc_end), color, thickness=1, lineType=cv.CV_AA)
-
-	return rimage
-
-def grayscale(image):
-	image_gray = cv.CreateImage(cv.GetSize(image), cv.IPL_DEPTH_8U,1)
-	cv.CvtColor(image, image_gray, cv.CV_BGR2GRAY)
-	return image_gray
-
-def surf(image_gray, params=(1, 300,3,4)):
-	surf_stor = cv.CreateMemStorage()
-	keypoints, desc = cv.ExtractSURF(image_gray, None, surf_stor, params)
-	del surf_stor
-	return ([loc for loc, lap, size, d, hess in keypoints], desc)
-
-class SURFMatcher:
-	def __init__(self):
-		self.model_images = {}
-		self.model_fea = {}
-
-	def add_file(self, model_name, label):
-		model_img = cv.LoadImage(model_name)
-		self.add_model(model_img, label)
-
-	def add_model(self, model_img, label):
-		mgray = grayscale(model_img)
-		m_loc, m_desc = surf(mgray)
-		self.model_images[label] = model_img
-		self.model_fea[label] = {'loc': m_loc, 'desc': m_desc}
-
-	def build_db(self):
-		fea_l = []
-		labels_l = []
-		locs_l = []
-		for k in self.model_fea:
-			desc = self.model_fea[k]['desc']
-			fea_l.append(np.array(desc))
-			loc = self.model_fea[k]['loc']
-			locs_l.append(np.array(loc))
-			labels_l.append(np.array([k for i in range(len(desc))]))
-
-		self.labels = np.row_stack(labels_l)
-		self.locs = np.row_stack(locs_l)
-		self.tree = sp.KDTree(np.row_stack(fea_l))
-
-	def match(self, desc, threshold=.6):
-		dists, idxs = self.tree.query(np.array(desc), 2)
-		ratio = dists[0] / dists[1]
-		ratio = min(ratio)
-		if ratio > threshold:
-			desc = self.tree.data[idxs[0]]
-			loc = self.locs[idxs[0]]
-			return desc, loc
-		else:
-			return None
-
-matcher = SURFMatcher()
-matcher.add_file("eclipse-icon.png", "eclipse")
-matcher.build_db()
-
-
-cascade = cv.Load("eclipse-icon.xml")
-
-
-def detect(im):
-	storage = cv.CreateMemStorage(0)
-	rects = cv.HaarDetectObjects(im, cascade, storage, 1.1, 2, 0, (10, 10))
-	if len(rects) > 0: return rects
-	return None
-
-	#return matcher.match(surf(im, (1, 3000, 3, 4))[1])
-
-	#input = MatchableImage(im)
-	#input.findFeatures("SURF")
-	#input.findDescriptors("SURF")
-	
-	#matches = iconim.matchTo(input)
-	#Mat img_corr;
-	#drawMatches(input.bw(), input.features, logos[i].logo.bw(), logos[i].logo.features, matches, img_corr);
-	#imshow(logos[i].name, img_corr);
-
-def foo():
-	src_corners = (()*4)((0,0), (object.width,0), (object.width, object.height), (0, object.height))
-	dst_corners = (()*4)()
-	correspond = cvCreateImage( cvSize(image.width, object.height+image.height), 8, 1 )
-	cvSetImageROI( correspond, cvRect( 0, 0, object.width, object.height ) )
-	cvCopy( object, correspond )
-	cvSetImageROI( correspond, cvRect( 0, object.height, correspond.width, correspond.height ) )
-	cvCopy( image, correspond )
-	cvResetImageROI( correspond )
-	if locatePlanarObject( objectKeypoints, objectDescriptors, imageKeypoints, imageDescriptors, src_corners, dst_corners ):
-		for i in xrange(4):
-			r1 = dst_corners[i%4]
-			r2 = dst_corners[(i+1)%4]
-			cvLine( correspond, cvPoint(r1.x, r1.y+object.height ), cvPoint(r2.x, r2.y+object.height ), colors[8] )
-	
-	ptpairs = findPairs(objectKeypoints, objectDescriptors, imageKeypoints, imageDescriptors)
-	for i in xrange(len(ptpairs)):
-		r1 = CV_GET_SEQ_ELEM(CvSURFPoint, objectKeypoints, ptpairs[i][0])[0]
-		r2 = CV_GET_SEQ_ELEM(CvSURFPoint, imageKeypoints, ptpairs[i][1])[0]
-		cvLine( correspond, cvPointFrom32f(r1.pt), cvPoint(cvRound(r2.pt.x), cvRound(r2.pt.y+object.height)), colors[8] )
-	
-	cvShowImage( "Object Correspond", correspond )
-	for i in xrange(objectKeypoints.total):
-		r = CV_GET_SEQ_ELEM(CvSURFPoint, objectKeypoints, i )[0]
-		cvCircle( object_color, cvPoint(cvRound(r.pt.x), cvRound(r.pt.y)), cvRound(r.size*1.2/9.*2), colors[0], 1, 8, 0 )
-	
-	cvShowImage( "Object", object_color )
-
-haveWindow = False
-
-#cv.ShowImage('Pic', draw_surf(iconim.image, iconim.keypoints, cv.RGB(0,255,0)))
-#cv.WaitKey(0)
-#cv.ShowImage('Pic', draw_surf2(iconim.image, iconim.keypoints, (cv.RGB(0,255,0))))
-#cv.WaitKey(0)
-
-
-for f in glob("2010-10-11.*.png"):
-	im = cv.LoadImageM(f, cv.CV_LOAD_IMAGE_GRAYSCALE)
-	#cv.ShowImage('Pic', im)
-
-	rects = detect(im)
-	if rects != None:
-		print f, ": yes"
+		imcopy = im
+	cv.ShowImage(window, imcopy)
+	cv.SetImageROI(im, (0,0,im.width,im.height))
+	if wait:
+		key = cv.WaitKey(0)
 	else:
-		print f, ": no"
+		key = cv.WaitKey(1)
+	if key == ord('q'): quit()
 		
-	if rects:
-		for (x,y,w,h),n in rects:
-			cv.Rectangle(im, (x,y), (x+w,y+h),
-						 cv.RGB(0, 255, 0), 3, 8, 0)
-			
-		if not haveWindow:
-			cv.NamedWindow('Pic', cv.CV_WINDOW_AUTOSIZE)
-			haveWindow = True
-		cv.ShowImage('Pic', im)
-		cv.WaitKey(0)
+eclipseIcon = cv.LoadImage("eclipse-icon.png", cv.CV_LOAD_IMAGE_UNCHANGED)
+eclipseFullRect = (0,0,eclipseIcon.width,eclipseIcon.height)
+
+for f in files:
+	print f,
+	im = cv.LoadImage(f)
+	#showImage(im, wait = False, window = "Screenshot")
+	iconrects = dock.getDockIcons(im, allSides = True)
+	if len(iconrects) == 0:
+		print "no eclipse (no icons at all)"
+		continue
+	
+	iconprobs = []
+	for iconrect in iconrects:
+		prob,eclipseRect = compareAreasVariable(im, iconrect, eclipseIcon)
+		iconprobs += [(prob,eclipseRect)]
+		#print "  ~:", prob, eclipseRect
+		#showImage(subImageScaled(im, iconrect, 200, 200), wait = False)
+		#showImage(resizedImage(diffImage(im, iconrect, eclipseIcon, eclipseRect), 200, 200), window = "diff")
+	
+	iconprobmin,iconrect = min(iconprobs)
+	if iconprobmin < 2: # 2 seems to be good :p (1.7634 mostly for eclipse)
+		print "found with", iconprobmin, iconrect
+		showImage(resizedImage(diffImage(im, iconrect, eclipseIcon, eclipseRect), 200, 200), window = "diff")
+	else:
+		print "no eclipse"
 	

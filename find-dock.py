@@ -5,6 +5,7 @@ from glob import glob
 from math import *
 from itertools import *
 from operator import itemgetter
+from itertools import chain
 import random
 
 
@@ -441,7 +442,7 @@ ShowImage = False
 Debug = False
 
 
-def getDockIcons(im):
+def getDockIcons(im, allSides = False):
 	if isinstance(im, str):
 		im = cv.LoadImage(im)
 		
@@ -505,6 +506,8 @@ def getDockIcons(im):
 	if ShowImage: showImageWithRects(im, rects)		
 	RectProbCache = dict()
 
+	if allSides:
+		return chain( *iconrects )
 	if dockprobs[dockindex] > 0:
 		return iconrects[dockindex]
 	return []
