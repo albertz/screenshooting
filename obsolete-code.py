@@ -189,3 +189,27 @@ def __create_default_hist__hs():
 	hist = cv.CreateHist([h_bins, s_bins], cv.CV_HIST_ARRAY, ranges, 1)
 	cv.ClearHist(hist)
 	return hist
+
+
+
+
+def partition(list, left, right, pivotIndex):
+	pivotValue = list[pivotIndex]
+	list[pivotIndex], list[right] = list[right], list[pivotIndex] # Move pivot to end
+	storeIndex = left
+	for i in range(left, right):
+		if list[i] < pivotValue:
+			list[storeIndex], list[i] = list[i], list[storeIndex]
+			storeIndex += 1
+	list[right], list[storeIndex] = list[storeIndex], list[right] # Move pivot to its final place
+	return storeIndex
+	 
+def quickfindFirstK(list, left, right, k):
+	if right > left:
+		# select pivotIndex between left and right
+		pivotIndex = (right - left) / 2		
+		pivotNewIndex = partition(list, left, right, pivotIndex)
+		if pivotNewIndex > k: # new condition
+			quickfindFirstK(list, left, pivotNewIndex-1, k)
+		if pivotNewIndex < k: # questionable
+			quickfindFirstK(list, pivotNewIndex+1, right, k)
