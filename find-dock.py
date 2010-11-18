@@ -507,7 +507,7 @@ def getDockIcons(im, allSides = False):
 	RectProbCache = dict()
 
 	if allSides:
-		return chain( *iconrects )
+		return list(chain( *iconrects ))
 	if dockprobs[dockindex] > 0:
 		return iconrects[dockindex]
 	return []

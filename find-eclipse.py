@@ -1,8 +1,9 @@
-#!/usr/bin/python
+#!/usr/bin/python -u -O
 
 from glob import glob
 import random
 import cv
+import sys
 from math import *
 dock = __import__("find-dock")
 
@@ -91,10 +92,19 @@ def resizedImage(im, w, h):
 	cv.Resize(im, newim, interpol)
 	return newim
 
+SubImageCache = dict()
+
 def subImageScaled(im, rect, w, h):
+	if im == eclipseIcon:
+		cacheKey = (rect, w, h)
+		if cacheKey in SubImageCache: return SubImageCache[cacheKey]
+	else:
+		cacheKey = None
 	rect = (rect[0], rect[1], rect[2]-rect[0], rect[3]-rect[1])
 	cv.SetImageROI(im, rect)
-	return resizedImage(im, w, h)
+	resizedim = resizedImage(im, w, h)
+	if cacheKey: SubImageCache[cacheKey] = resizedim
+	return resizedim
 	
 def compareAreas(im1, rect1, im2, rect2):
 	n = 10
@@ -109,23 +119,31 @@ def compareAreas(im1, rect1, im2, rect2):
 			c2 = cv.Get2D(im2, x, y)
 			#print x,",",y,":",c1,c2
 			if c2[0:3] == (255,255,255): continue
-
-			values += [ sqrt( sum( [ (abs(c1[i] - c2[i]) / 255.0) ** 2 for i in [0,1,2] ] ) ) ]
+			weight = sum( (255 - c2[i]) / 255.0 for i in [0,1,2] ) / 3
+			values += [ sqrt( sum( [ (abs(c1[i] - c2[i]) / 255.0) ** 2 for i in [0,1,2] ] ) ) * weight ]
 	#print values
 	return sqrt(sum([ x*x for x in values ]))
 	return sum(values) / len(values)
 
 def compareAreasVariable(im1, rect1, im2):
-	values = []
-	step = 2
-	n = 10
-	for x1 in xrange(0,n,step):
-		for y1 in xrange(0,n,step):
-			for x2 in xrange(im2.width-n+1, im2.width+1, step):
-				for y2 in xrange(im2.height-n+1, im2.height+1, step):
-					values += [ (compareAreas(im1, rect1, im2, (x1,y1,x2,y2)), (x1,y1,x2,y2)) ]
-	return min(values)
-
+	step = 10
+	dx1 = 1
+	dx2 = 2
+	dy1 = 1
+	dy2 = 2
+	x1,y1 = dx1*step, dy1*step
+	x2,y2 = im2.width - x1, im2.height - y1
+	while step > 0:
+		values = []
+		for _x1 in xrange(max(x1 - dx1*step, 0), x1 + dx1*step+1, step):
+			for _y1 in xrange(max(y1 - dy1*step, 0), y1 + dy1*step+1, step):
+				for _x2 in xrange(x2 - dx2*step, min(x2 + dx2*step, im2.width)+1, step):
+					for _y2 in xrange(y2 - dy2*step, min(y2 + dy2*step,im2.height)+1, step):
+						values += [ (compareAreas(im1, rect1, im2, (_x1,_y1,_x2,_y2)), (_x1,_y1,_x2,_y2)) ]
+		value, (x1,y1,x2,y2) = min(values)
+		step -= 2
+	return value, (x1,y1,x2,y2)
+	
 def diffImage(im1, rect1, im2, rect2):
 	w,h = 20,20
 	im1 = subImageScaled(im1, rect1, w, h)
@@ -140,13 +158,14 @@ def diffImage(im1, rect1, im2, rect2):
 			cv.Set2D(newim, x, y, newc)
 	return newim
 
-#files = glob("*.png")
-#files = glob("2010-10-*.png")
-#files = glob("2010-10-11.*.png") # bottom dock with eclipse
-files = glob("2010-10-28.*.png") # left dock with eclipse
-random.shuffle(files)
-
-#cv.NamedWindow("icon", cv.CV_WINDOW_AUTOSIZE)
+if len(sys.argv) <= 1:
+	files = glob("*.png")
+	#files = glob("2010-10-*.png")
+	#files = glob("2010-10-11.*.png") # bottom dock with eclipse
+	#files = glob("2010-10-28.*.png") # left dock with eclipse
+	random.shuffle(files)
+else:
+	files = sys.argv[1:]
 
 def showImage(im, rect = None, wait = True, window = "icon"):
 	if rect:
@@ -167,26 +186,35 @@ eclipseIcon = cv.LoadImage("eclipse-icon.png", cv.CV_LOAD_IMAGE_UNCHANGED)
 eclipseFullRect = (0,0,eclipseIcon.width,eclipseIcon.height)
 
 for f in files:
-	print f,
+	sys.stdout.write(f + " :")
+	sys.stdout.flush()
 	im = cv.LoadImage(f)
+	sys.stdout.write(".")
+	sys.stdout.flush()
+
 	#showImage(im, wait = False, window = "Screenshot")
 	iconrects = dock.getDockIcons(im, allSides = True)
+	sys.stdout.write("*")
+	sys.stdout.flush()
+
 	if len(iconrects) == 0:
-		print "no eclipse (no icons at all)"
+		print ": no eclipse (no icons at all)"
 		continue
 	
 	iconprobs = []
 	for iconrect in iconrects:
 		prob,eclipseRect = compareAreasVariable(im, iconrect, eclipseIcon)
-		iconprobs += [(prob,eclipseRect)]
+		sys.stdout.write(".")
+		sys.stdout.flush()
+		iconprobs += [(prob,iconrect,eclipseRect)]
 		#print "  ~:", prob, eclipseRect
 		#showImage(subImageScaled(im, iconrect, 200, 200), wait = False)
 		#showImage(resizedImage(diffImage(im, iconrect, eclipseIcon, eclipseRect), 200, 200), window = "diff")
-	
-	iconprobmin,iconrect = min(iconprobs)
+
+	iconprobmin,iconrect,eclipseRect = min(iconprobs)
 	if iconprobmin < 2: # 2 seems to be good :p (1.7634 mostly for eclipse)
-		print "found with", iconprobmin, iconrect
-		showImage(resizedImage(diffImage(im, iconrect, eclipseIcon, eclipseRect), 200, 200), window = "diff")
+		print ": found with", iconprobmin, iconrect, eclipseRect
+		showImage(subImageScaled(im, iconrect, 200, 200), window = "diff")
 	else:
-		print "no eclipse"
+		print ": no eclipse (min is", iconprobmin, "at", iconrect, ")"
 	
