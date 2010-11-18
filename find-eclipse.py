@@ -119,8 +119,8 @@ def compareAreas(im1, rect1, im2, rect2):
 			c2 = cv.Get2D(im2, x, y)
 			#print x,",",y,":",c1,c2
 			if c2[0:3] == (255,255,255): continue
-			weight = sum( (255 - c2[i]) / 255.0 for i in [0,1,2] ) / 3
-			values += [ sqrt( sum( [ (abs(c1[i] - c2[i]) / 255.0) ** 2 for i in [0,1,2] ] ) ) * weight ]
+			#weight = sum( (255 - c2[i]) / 255.0 for i in [0,1,2] ) / 3
+			values += [ sqrt( sum( [ (abs(c1[i] - c2[i]) / 255.0) ** 2 for i in [0,1,2] ] ) ) ]
 	#print values
 	return sqrt(sum([ x*x for x in values ]))
 	return sum(values) / len(values)
@@ -159,9 +159,9 @@ def diffImage(im1, rect1, im2, rect2):
 	return newim
 
 if len(sys.argv) <= 1:
-	files = glob("*.png")
+	#files = glob("*.png")
 	#files = glob("2010-10-*.png")
-	#files = glob("2010-10-11.*.png") # bottom dock with eclipse
+	files = glob("2010-10-11.*.png") # bottom dock with eclipse
 	#files = glob("2010-10-28.*.png") # left dock with eclipse
 	random.shuffle(files)
 else:
