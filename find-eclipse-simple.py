@@ -252,6 +252,10 @@ def iteratePosInRect(rect):
 		for _y in xrange(int(y1),int(y2)):
 			yield (_x,_y)
 
+MaxW = 60
+MaxH = 60
+MaxColorDist = 30
+
 def objectBoundingRect(im, rect):
 	colors = ColorSet(10)
 	for x,y in iteratePosInRect((0,0,W,H)):
@@ -270,8 +274,8 @@ def objectBoundingRect(im, rect):
 		else: rect[dir] -= 1
 		x1,y1,x2,y2 = rect
 
-		if x2-x1 > 50: break
-		if y2-y1 > 50: break
+		if x2-x1 > MaxW: break
+		if y2-y1 > MaxH: break
 
 		if x1 <= 0: dirs.remove(0)
 		if y1 <= 0: dirs.remove(1)
@@ -286,9 +290,9 @@ def objectBoundingRect(im, rect):
 		pixelcolors = [cv.Get2D(im, y,x)[0:3] for (x,y) in newpositions]
 		colordists = [colors.distance(c) for c in pixelcolors]
 		#print dir, min(izip(colordists,newpositions))
-		if min(colordists) < 30:
+		if min(colordists) < MaxColorDist:
 			for color,colordist in izip(pixelcolors,colordists):
-				if colordist < 30:
+				if colordist < MaxColorDist:
 					colors.merge(color)
 		else: # too much color diff -> stop in this direction
 			dirs.remove(dir)
@@ -300,7 +304,22 @@ def objectBoundingRect(im, rect):
 	
 	return tuple(rect)
 
-			
+MinW = 15
+MinH = 15
+MaxWHDiff = 1.5
+
+def rectIconConditionsAreOk(rect):
+	x1,y1,x2,y2 = rect
+	w = x2-x1
+	h = y2-y1
+	if w > MaxW or w < MinW: return False
+	if h > MaxH or h < MinH: return False
+	if w > h: f = float(w) / h
+	else: f = float(h) / w
+	if f > MaxWHDiff: return False
+	return True
+	
+
 def checkFile(f):
 	sys.stdout.write(f + " :")
 	sys.stdout.flush()
@@ -310,7 +329,9 @@ def checkFile(f):
 	matches = rectsFromMatchSpots(matches)
 	
 	matches = map(partial(objectBoundingRect, im), matches)
-	print matches
+	matches = [r for r in matches if rectIconConditionsAreOk(r)]
+	
+	print zip(matches, [ (r[2] - r[0] + r[3] - r[1]) / 2 for r in matches ])
 	
 	#matches = map(partial(middleRect, scale = 2.5), matches)
 	
