@@ -213,3 +213,45 @@ def quickfindFirstK(list, left, right, k):
 			quickfindFirstK(list, left, pivotNewIndex-1, k)
 		if pivotNewIndex < k: # questionable
 			quickfindFirstK(list, pivotNewIndex+1, right, k)
+
+
+
+
+
+
+def bestNMatches__manuel(im, n = 100):
+	DockSize = 200
+	def subRects(rect):
+		x1,y1,x2,y2 = rect
+		for _x1 in xrange(x1, x2 - W, W/2):
+			for _y1 in xrange(y1, y2 - H, H/2):
+				_x2 = _x1 + W
+				_y2 = _y1 + H
+				yield (_x1,_y1,_x2,_y2)
+	leftRect = (0,0,DockSize,im.height)
+	rightRect = (im.width-DockSize,0,im.width,im.height)
+	bottomRect = (DockSize,im.height-DockSize,im.width-DockSize,im.height)
+	allSubRects = chain( subRects(leftRect), subRects(rightRect), subRects(bottomRect) )
+
+	def match2(subrect, dx, dy):
+		values = []
+		for x in range(W):
+			for y in range(H):
+				c1 = cv.Get2D(im, subrect[0] + x, subrect[1] + y)
+				c2 = cv.Get2D(eclipseFingerPrint, (x + dx) % W, (y + dy) % H)
+				values += [ sqrt( sum( [ (abs(c1[i] - c2[i]) / 255.0) ** 2 for i in [0,1,2] ] ) ) ]
+		return sqrt(sum([ x*x for x in values ]))
+
+	def match(subrect):
+		#sys.stdout.write(".")
+		#sys.stdout.flush()
+		return min(match2(subrect,dx,dy) for dx in range(W) for dy in range(H))
+
+	def matchRects(rects):
+		for r in rects:
+			yield (match(r),r)
+		
+	nlargest = heapq.nlargest(n, matchRects(allSubRects))
+	return map(itemgetter(1), nlargest)
+
+

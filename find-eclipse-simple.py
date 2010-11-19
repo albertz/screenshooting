@@ -9,6 +9,7 @@ from math import *
 from itertools import *
 from operator import *
 from array import *
+from functools import *
 
 
 def subarea(rect, ix, iy, n):
@@ -23,12 +24,16 @@ def subarea(rect, ix, iy, n):
 	return (x1,y1,x2,y2)
 
 def resizedImage(im, w, h):
-	newim = cv.CreateImage((w,h), cv.IPL_DEPTH_8U, im.channels)
+	newim = cv.CreateImage((int(w),int(h)), cv.IPL_DEPTH_8U, im.channels)
 	interpol = cv.CV_INTER_CUBIC
 	#interpol = CV_INTER_LINEAR
 	#interpol = CV_INTER_AREA
 	cv.Resize(im, newim, interpol)
 	return newim
+
+def scaledImage(im, scale):
+	w,h = cv.GetSize(im)
+	return resizedImage(im, w * scale, h * scale)
 
 SubImageCache = dict()
 
@@ -56,8 +61,8 @@ def compareAreas(im1, rect1, im2, rect2):
 	values = []
 	for x in range(n):
 		for y in range(n):
-			c1 = cv.Get2D(im1, x, y)
-			c2 = cv.Get2D(im2, x, y)
+			c1 = cv.Get2D(im1, y, x)
+			c2 = cv.Get2D(im2, y, x)
 			#print x,",",y,":",c1,c2
 			if c2[0:3] == (255,255,255): continue
 			#weight = sum( (255 - c2[i]) / 255.0 for i in [0,1,2] ) / 3
@@ -126,46 +131,21 @@ def subSquareRect(r):
 		return (x1, y1 + (h - w)/2, x2, y2 - (h - w)/2)
 	return (x1 + (w - h)/2, y1, x2 - (w - h)/2, y2)
 		
+def rectCenter(r):
+	x1,y1,x2,y2 = r
+	return ((x1+x2)/2, (y1+y2)/2)
+
+def dist(v1,v2):
+	return sqrt(sum( (a - b) ** 2 for (a,b) in zip(v1,v2) ))
+
+def rectDist(r1,r2):
+	return dist(rectCenter(r1), rectCenter(r2))
+
 
 W = 4
 H = 4
-eclipseFingerPrint = subImageScaled(eclipseIcon, middleRect(subSquareRect(eclipseFullRect), 0.3), W, H)
+eclipseFingerPrint = subImageScaled(eclipseIcon, middleRect(subSquareRect(eclipseFullRect), 0.4), W, H)
 
-
-def bestNMatches__manuel(im, n = 100):
-	DockSize = 200
-	def subRects(rect):
-		x1,y1,x2,y2 = rect
-		for _x1 in xrange(x1, x2 - W, W/2):
-			for _y1 in xrange(y1, y2 - H, H/2):
-				_x2 = _x1 + W
-				_y2 = _y1 + H
-				yield (_x1,_y1,_x2,_y2)
-	leftRect = (0,0,DockSize,im.height)
-	rightRect = (im.width-DockSize,0,im.width,im.height)
-	bottomRect = (DockSize,im.height-DockSize,im.width-DockSize,im.height)
-	allSubRects = chain( subRects(leftRect), subRects(rightRect), subRects(bottomRect) )
-
-	def match2(subrect, dx, dy):
-		values = []
-		for x in range(W):
-			for y in range(H):
-				c1 = cv.Get2D(im, subrect[0] + x, subrect[1] + y)
-				c2 = cv.Get2D(eclipseFingerPrint, (x + dx) % W, (y + dy) % H)
-				values += [ sqrt( sum( [ (abs(c1[i] - c2[i]) / 255.0) ** 2 for i in [0,1,2] ] ) ) ]
-		return sqrt(sum([ x*x for x in values ]))
-
-	def match(subrect):
-		#sys.stdout.write(".")
-		#sys.stdout.flush()
-		return min(match2(subrect,dx,dy) for dx in range(W) for dy in range(H))
-
-	def matchRects(rects):
-		for r in rects:
-			yield (match(r),r)
-		
-	nlargest = heapq.nlargest(n, matchRects(allSubRects))
-	return map(itemgetter(1), nlargest)
 
 def bestNMatches(im, n = 100):
 	matchImage = cv.CreateImage((im.width-W+1,im.height-H+1), cv.IPL_DEPTH_32F, 1)
@@ -181,6 +161,8 @@ def bestNMatches(im, n = 100):
 
 
 
+HaveWindow = False
+
 def showImageWithRects(im, rects = []):
 	def draw_rects(im, rects, color = cv.RGB(0,255,0)):
 		for x1,y1,x2,y2 in rects:
@@ -189,8 +171,11 @@ def showImageWithRects(im, rects = []):
 
 	imcopy = cv.CloneImage(im)
 	draw_rects(imcopy, rects)
-	#cv.NamedWindow('Screenshot', cv.CV_WINDOW_AUTOSIZE)
-	cv.ShowImage("Screenshot", imcopy)
+	global HaveWindow
+	if not HaveWindow:
+		cv.NamedWindow("Screenshot", cv.CV_WINDOW_AUTOSIZE)
+		HaveWindow = True
+	cv.ShowImage("Screenshot", resizedImage(imcopy, 800, 600))
 	cv.WaitKey(1)
 
 
@@ -199,17 +184,139 @@ if False:
 	cv.WaitKey(0)
 	quit()
 
+
+def vecMult(r, f):
+	return map(lambda x: x * f, r)
+
+def vecSum(r1, r2):
+	return map(lambda (x1,x2): x1 + x2, zip(r1,r2))
+
+def scaleRectToSize(r, size):
+	return middleRect(r, size / (r[2]-r[0]))
+
+
+def rectsFromMatchSpots(matches):
+	rects = []
+	def putIntoRects(newr, rects):
+		for i in xrange(len(rects)):
+			r,n = rects[i]
+			if rectDist(r,newr) < 20:
+				r = scaleRectToSize(r, newr[2] - newr[0])
+				sizeScale = max(1.0, rectDist(r,newr) / (r[2] - r[0]))
+				r = vecSum(vecMult(r, n), newr)
+				n += 1
+				r = vecMult(r, 1.0/n)
+				r = middleRect(r, sizeScale)
+				rects[i] = (r,n)
+				return
+		rects += [(newr,1)]
+		
+	for r in matches:
+		putIntoRects(r, rects)
+
+	return map(itemgetter(0), [(r,n) for (r,n) in rects if n > 3])
+
+
+class ColorSet:
+	def __init__(self, colorNum):
+		self.colors = [((0,0,0),0)] * colorNum
+	
+	def firstUnsetIndex(self):
+		for i,(color,n) in izip(xrange(len(self.colors)),self.colors):
+			if n == 0: return i
+		return len(self.colors)
+		
+	def bestMatch(self, color):
+		endIndex = self.firstUnsetIndex()
+		if endIndex == 0: return 0,0
+		dists = imap(partial(dist, color), imap(itemgetter(0), self.colors))
+		d,i = min(izip(dists,xrange(endIndex)))
+		if d > 0 and endIndex < len(self.colors): return endIndex,d
+		return i,d
+		
+	def merge(self, color):
+		i,_ = self.bestMatch(color)
+		oldcolor,n = self.colors[i]
+		color = vecSum(vecMult(oldcolor, n), color)
+		n += 1
+		color = vecMult(color, 1.0/n)
+		self.colors[i] = (color,n)
+	
+	def distance(self, color):
+		_,d = self.bestMatch(color)
+		return d
+
+def iteratePosInRect(rect):
+	x1,y1,x2,y2 = rect
+	for _x in xrange(int(x1),int(x2)):
+		for _y in xrange(int(y1),int(y2)):
+			yield (_x,_y)
+
+def objectBoundingRect(im, rect):
+	colors = ColorSet(10)
+	for x,y in iteratePosInRect((0,0,W,H)):
+		colors.merge(cv.Get2D(eclipseFingerPrint, y, x)[0:3])
+	
+	rect = map(int, rect)
+	dirs = set()
+	x1,y1,x2,y2 = rect
+	if x1 > 0: dirs.add(0)
+	if y1 > 0: dirs.add(1)
+	if x2 < im.width - 1: dirs.add(2)
+	if y2 < im.height - 1: dirs.add(3)
+	dir = dirs.__iter__().next()
+	while True:			
+		if dir >= 2: rect[dir] += 1
+		else: rect[dir] -= 1
+		x1,y1,x2,y2 = rect
+
+		if x2-x1 > 50: break
+		if y2-y1 > 50: break
+
+		if x1 <= 0: dirs.remove(0)
+		if y1 <= 0: dirs.remove(1)
+		if x2 >= im.width: dirs.remove(2)
+		if y2 >= im.height: dirs.remove(3)
+		
+		if dir == 0: newpositions = [(x1,_y) for _y in xrange(y1,y2)]
+		if dir == 1: newpositions = [(_x,y1) for _x in xrange(x1,x2)]
+		if dir == 2: newpositions = [(x2-1,_y) for _y in xrange(y1,y2)]
+		if dir == 3: newpositions = [(_x,y2-1) for _x in xrange(x1,x2)]
+		
+		pixelcolors = [cv.Get2D(im, y,x)[0:3] for (x,y) in newpositions]
+		colordists = [colors.distance(c) for c in pixelcolors]
+		#print dir, min(izip(colordists,newpositions))
+		if min(colordists) < 30:
+			for color,colordist in izip(pixelcolors,colordists):
+				if colordist < 30:
+					colors.merge(color)
+		else: # too much color diff -> stop in this direction
+			dirs.remove(dir)
+		
+		if len(dirs) == 0: break
+		while True:
+			dir = (dir + 1) % 4
+			if dir in dirs: break
+	
+	return tuple(rect)
+
+			
 def checkFile(f):
 	sys.stdout.write(f + " :")
 	sys.stdout.flush()
 	im = cv.LoadImage(f)
 
-	matches = bestNMatches(im)
-	#print matches
+	matches = bestNMatches(im)	
+	matches = rectsFromMatchSpots(matches)
 	
-	showImageWithRects(im, matches)	
+	matches = map(partial(objectBoundingRect, im), matches)
+	print matches
+	
+	#matches = map(partial(middleRect, scale = 2.5), matches)
+	
+	showImageWithRects(im, matches)
 	if cv.WaitKey(0) == ord('q'): quit()
-	cv.DestroyAllWindows()
+	#cv.DestroyWindow("Screenshot")
 	return
 	
 	iconprobs = []
@@ -233,10 +340,14 @@ def checkFile(f):
 if __name__ == "__main__":
 	if len(sys.argv) <= 1:
 		#files = glob("*.png")
-		#files = glob("2010-10-*.png")
-		files = glob("2010-10-11.*.png") # bottom dock with eclipse
+		files = glob("2010-10-*.png")
+		#files = glob("2010-10-11.*.png") # bottom dock with eclipse
 		#files = glob("2010-10-28.*.png") # left dock with eclipse
 		random.shuffle(files)
+		
+		# some problematic ones
+		files = ["2010-10-16.23.59.32.png"] + files
+		
 	else:
 		files = sys.argv[1:]
 
