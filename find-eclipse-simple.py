@@ -277,10 +277,10 @@ def objectBoundingRect(im, rect):
 		if x2-x1 > MaxW: break
 		if y2-y1 > MaxH: break
 
-		if x1 <= 0: dirs.remove(0)
-		if y1 <= 0: dirs.remove(1)
-		if x2 >= im.width: dirs.remove(2)
-		if y2 >= im.height: dirs.remove(3)
+		if 0 in dirs and x1 <= 0: dirs.remove(0)
+		if 1 in dirs and y1 <= 0: dirs.remove(1)
+		if 2 in dirs and x2 >= im.width: dirs.remove(2)
+		if 3 in dirs and y2 >= im.height: dirs.remove(3)
 		
 		if dir == 0: newpositions = [(x1,_y) for _y in xrange(y1,y2)]
 		if dir == 1: newpositions = [(_x,y1) for _x in xrange(x1,x2)]
