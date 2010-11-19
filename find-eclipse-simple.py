@@ -322,6 +322,7 @@ def rectIconConditionsAreOk(im, rect):
 	if borderDist > MaxBorderDist: return False
 	return True
 	
+ShowImages = False
 
 def checkFile(f):
 	sys.stdout.write(f + " :")
@@ -338,32 +339,19 @@ def checkFile(f):
 	
 	#matches = map(partial(middleRect, scale = 2.5), matches)
 	
-	for m in matches:
-		print " ", compareAreasVariable(im, m, eclipseIcon), m
-	
-	cv.SetImageROI(im, (0,0,im.width,im.height))	
-	showImageWithRects(im, matches)
-	if cv.WaitKey(0) == ord('q'): quit()
-	#cv.DestroyWindow("Screenshot")
-	return
-	
-	iconprobs = []
-	for iconrect in iconrects:
-		prob,eclipseRect = compareAreasVariable(im, iconrect, eclipseIcon)
-		sys.stdout.write(".")
-		sys.stdout.flush()
-		iconprobs += [(prob,iconrect,eclipseRect)]
-		#print "  ~:", prob, eclipseRect
-		#showImage(subImageScaled(im, iconrect, 200, 200), wait = False)
-		#showImage(resizedImage(diffImage(im, iconrect, eclipseIcon, eclipseRect), 200, 200), window = "diff")
-
-	iconprobmin,iconrect,eclipseRect = min(iconprobs)
-	if iconprobmin < 2: # 2 seems to be good :p (1.7634 mostly for eclipse)
-		print ": found with", iconprobmin, iconrect, eclipseRect
-		showImage(subImageScaled(im, iconrect, 200, 200), window = "diff")
+	if len(matches) > 0:
+		diffToEclipse,match = min((compareAreasVariable(im, m, eclipseIcon)[0], m) for m in matches)
 	else:
-		print ": no eclipse (min is", iconprobmin, "at", iconrect, ")"
+		diffToEclipse = 1000
+	if diffToEclipse < 2:
+		print " yes; found Eclipse at", match
+	else:
+		print " no"
 	
+	if ShowImages:
+		cv.SetImageROI(im, (0,0,im.width,im.height))	
+		showImageWithRects(im, matches)
+		if cv.WaitKey(0) == ord('q'): quit()
 
 if __name__ == "__main__":
 	if len(sys.argv) <= 1:
