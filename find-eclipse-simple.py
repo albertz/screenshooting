@@ -307,8 +307,9 @@ def objectBoundingRect(im, rect):
 MinW = 15
 MinH = 15
 MaxWHDiff = 1.5
+MaxBorderDist = 30
 
-def rectIconConditionsAreOk(rect):
+def rectIconConditionsAreOk(im, rect):
 	x1,y1,x2,y2 = rect
 	w = x2-x1
 	h = y2-y1
@@ -317,6 +318,8 @@ def rectIconConditionsAreOk(rect):
 	if w > h: f = float(w) / h
 	else: f = float(h) / w
 	if f > MaxWHDiff: return False
+	borderDist = min(x1, im.height - y2, im.width - x2)
+	if borderDist > MaxBorderDist: return False
 	return True
 	
 
@@ -329,12 +332,16 @@ def checkFile(f):
 	matches = rectsFromMatchSpots(matches)
 	
 	matches = map(partial(objectBoundingRect, im), matches)
-	matches = [r for r in matches if rectIconConditionsAreOk(r)]
+	matches = [r for r in matches if rectIconConditionsAreOk(im, r)]
 	
-	print zip(matches, [ (r[2] - r[0] + r[3] - r[1]) / 2 for r in matches ])
+	#print zip(matches, [ (r[2] - r[0] + r[3] - r[1]) / 2 for r in matches ])
 	
 	#matches = map(partial(middleRect, scale = 2.5), matches)
 	
+	for m in matches:
+		print " ", compareAreasVariable(im, m, eclipseIcon), m
+	
+	cv.SetImageROI(im, (0,0,im.width,im.height))	
 	showImageWithRects(im, matches)
 	if cv.WaitKey(0) == ord('q'): quit()
 	#cv.DestroyWindow("Screenshot")
