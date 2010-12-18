@@ -85,9 +85,9 @@ if __name__ == "__main__":
         # face detection
         face, faces = detect(frame)
         if face:
-			 
-			# display webcam image
-        	cv.ShowImage('Face', subImageScaled(frame, face, 200, 200))
+            f = face[3]/face[2]
+            # display webcam image
+            cv.ShowImage('Face', subImageScaled(frame, face, 200, 200*f))
 			
         cv.SetImageROI(frame, (0,0,frame.width,frame.height))
         for (x,y,w,h),n in faces:
