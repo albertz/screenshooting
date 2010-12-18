@@ -87,7 +87,9 @@ if __name__ == "__main__":
         if face:
             f = face[3]/face[2]
             # display webcam image
-            cv.ShowImage('Face', subImageScaled(frame, face, 200, 200*f))
+            faceim = subImageScaled(frame, face, 200, 200*f)
+            cv.ShowImage('Face', faceim)
+            cv.SaveImage("face.jpg", faceim)
 			
         cv.SetImageROI(frame, (0,0,frame.width,frame.height))
         for (x,y,w,h),n in faces:
