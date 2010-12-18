@@ -25,10 +25,29 @@ def detect(image):
     faces = cv.HaarDetectObjects(grayscale, cascade, storage, 1.2, 2, cv.CV_HAAR_DO_CANNY_PRUNING, (50, 50))
  
     if faces:
-        print 'face detected!'
-        for (x,y,w,h),n in faces:
-            cv.Rectangle(image, (x,y), (x+w,y+h),
-                         cv.RGB(0, 255, 0), 3, 8, 0)
+		face, _ = max(faces, key = lambda ((x,y,w,h),n) : w * h)
+		x,y,w,h = face
+		c = 30
+		face = x - c, y - c, w + 2*c, h + 2*c 
+		return face, faces
+		
+    return None, []
+	
+
+def resizedImage(im, w, h):
+	newim = cv.CreateImage((w,h), cv.IPL_DEPTH_8U, im.channels)
+	interpol = cv.CV_INTER_CUBIC
+	#interpol = CV_INTER_LINEAR
+	#interpol = CV_INTER_AREA
+	cv.Resize(im, newim, interpol)
+	return newim
+
+def subImageScaled(im, rect, w, h):
+	rect = (rect[0], rect[1], rect[2], rect[3])
+	cv.SetImageROI(im, rect)
+	resizedim = resizedImage(im, w, h)
+	return resizedim
+	
  
 if __name__ == "__main__":
     #print "OpenCV version: %s (%d, %d, %d)" % (cv.CV_VERSION,
@@ -39,7 +58,7 @@ if __name__ == "__main__":
     print "Press ESC to exit ..."
  
     # create windows
-    cv.NamedWindow('Camera', cv.CV_WINDOW_AUTOSIZE)
+    #cv.NamedWindow('Camera', cv.CV_WINDOW_AUTOSIZE)
  
     # create capture device
     device = 0 # assume we want first device
@@ -64,9 +83,15 @@ if __name__ == "__main__":
         cv.Flip(frame, None, 1)
  
         # face detection
-        detect(frame)
- 
-        # display webcam image
+        face, faces = detect(frame)
+        if face:
+			 
+			# display webcam image
+        	cv.ShowImage('Face', subImageScaled(frame, face, 200, 200))
+			
+        cv.SetImageROI(frame, (0,0,frame.width,frame.height))
+        for (x,y,w,h),n in faces:
+            cv.Rectangle(frame, (x,y), (x+w,y+h), cv.RGB(0, 255, 0), 3, 8, 0)
         cv.ShowImage('Camera', frame)
  
         # handle events
