@@ -60,9 +60,11 @@ if __name__ == "__main__":
     # create windows
     #cv.NamedWindow('Camera', cv.CV_WINDOW_AUTOSIZE)
  
+    import sys
     # create capture device
     device = 0 # assume we want first device
-    capture = cv.CreateCameraCapture(0)
+    if len(sys.argv) > 1: device = int(sys.argv[1])
+    capture = cv.CreateCameraCapture(device)
     cv.SetCaptureProperty(capture, cv.CV_CAP_PROP_FRAME_WIDTH, 640)
     cv.SetCaptureProperty(capture, cv.CV_CAP_PROP_FRAME_HEIGHT, 480)    
  
